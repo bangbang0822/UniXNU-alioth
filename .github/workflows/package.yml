@@ -83,25 +83,32 @@ jobs:
         # CONFIG_XNU_OWNER_DATA_MOUNT, so scripts/unixnu/runtime.py takes the fallback branch
         # and scripts/unixnu/payload.py refuses to build without --data-ramdisk. The seed is
         # not in any repository; supply this device's own packed seed.
+        #
+        # A missing seed is a warning, not a failure: the kernel, the firmware and the boot
+        # chain before the payload do not need one, so a run without it still validates them.
+        id: seed
         env:
           seed_url: ${{ secrets.UNIXNU_DATA_SEED_URL }}
           trust_url: ${{ secrets.UNIXNU_TRUST_CACHE_URL }}
         run: |
           mkdir -p runtime
+          have=0
           if [ -z "$seed_url" ]; then
-            echo '::error::Set UNIXNU_DATA_SEED_URL to this device'"'"'s packed Data seed (.dbr).'
-            echo 'CONFIG_XNU_OWNER_DATA_MOUNT is on and no [payload.runtime] builder exists,'
-            echo 'so build payload cannot produce an image without it.'
-            exit 1
-          fi
-          curl -fsSL "$seed_url" -o runtime/data.dbr
-          shasum -a 256 runtime/data.dbr
-          if [ -n "$trust_url" ]; then
-            curl -fsSL "$trust_url" -o runtime/trust.bundle
-            shasum -a 256 runtime/trust.bundle
+            echo '::warning::No UNIXNU_DATA_SEED_URL: the payload, the boot image and everything after them are skipped.'
+            echo 'CONFIG_XNU_OWNER_DATA_MOUNT is on and no [payload.runtime] builder exists, so'
+            echo 'build payload needs this device'"'"'s packed Data seed before it can run.'
           else
-            echo '::warning::No UNIXNU_TRUST_CACHE_URL: the image will boot the kernel but AMFI will refuse the first exec.'
+            curl -fsSL "$seed_url" -o runtime/data.dbr
+            shasum -a 256 runtime/data.dbr
+            have=1
+            if [ -n "$trust_url" ]; then
+              curl -fsSL "$trust_url" -o runtime/trust.bundle
+              shasum -a 256 runtime/trust.bundle
+            else
+              echo '::warning::No UNIXNU_TRUST_CACHE_URL: the image will boot the kernel but AMFI will refuse the first exec.'
+            fi
           fi
+          echo "have=$have" >> "$GITHUB_OUTPUT"
         working-directory: device
       - name: defconfig, fetch, tree
         working-directory: UniXNU
@@ -152,6 +159,7 @@ jobs:
           set -euo pipefail
           ./unixnu build firmware -D ../device --uefi "$UNIXNU_UEFI"
       - name: build payload
+        if: steps.seed.outputs.have == '1'
         working-directory: UniXNU
         run: |
           set -euo pipefail
@@ -161,17 +169,19 @@ jobs:
           fi
           ./unixnu "${args[@]}"
       - name: bootimg
+        if: steps.seed.outputs.have == '1'
         working-directory: UniXNU
         run: |
           set -euo pipefail
           ./unixnu bootimg -D ../device --uefi "$UNIXNU_UEFI" \
             --dtb "$UNIXNU_UEFI/Resources/DTBs/alioth.dtb" -o ../device/boot.img
       - name: images
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: images-${{ inputs.os }}
           retention-days: 1
-          if-no-files-found: error
+          if-no-files-found: warn
           path: |
             device/boot.img
             UniXNU/out/alioth/*/*/boot/boot.img
