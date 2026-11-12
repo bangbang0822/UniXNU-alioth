@@ -1,0 +1,54 @@
+# alioth_bootstrap_defconfig -- the first pass of a cold build.
+#
+# It exists only to produce the compile records under build/xnu/ and one prelinked kernel,
+# which the archive builders that bind against an "original candidate" then read as their
+# baseline. On a cold tree those builders stop with
+#
+#   No reference candidate available
+#
+# because scripts/build-gop-legacy-display.py and build-sheng-hid-input.py read symbol
+# addresses out of a previously prelinked kernel and write them into original-bindings.S.
+# That chain has to start somewhere, and this is the documented way to start it:
+# CONFIG_XNU_BUILD_ARCHIVES is absent, so this pass does not run the board archive list at
+# all -- the archives are exactly what needs the candidate this pass creates.
+#
+# The same role is played by configs/nabu_bootstrap_defconfig in unixnu-nabu, which is the
+# device repository this recipe was taken from.
+#
+# This configuration does NOT produce a usable image. It is a build intermediate.
+
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_NATIVE_PAN=y
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+
+# The arch profile fragment sets this; a cold build must turn it back off.
+# CONFIG_XNU_BUILD_ARCHIVES is not set
+
+# Everything below drags in a board archive, a firmware bundle or an owner policy chain whose
+# inputs a cold tree does not have.
+# CONFIG_XNU_SOURCE_PTHREAD is not set
+# CONFIG_XNU_NATIVE_UFS is not set
+# CONFIG_XNU_NATIVE_AES is not set
+# CONFIG_XNU_NATIVE_VIRTIO_BLOCK is not set
+# CONFIG_XNU_NATIVE_RAM_BLOCK is not set
+# CONFIG_XNU_NATIVE_VIRTIO_CONSOLE is not set
+# CONFIG_XNU_NATIVE_MOBILE_DISPLAY is not set
+# CONFIG_XNU_NATIVE_LEGACY_DISPLAY is not set
+# CONFIG_XNU_NATIVE_ADRENO is not set
+# CONFIG_XNU_NATIVE_OFFLINE_GPU is not set
+# CONFIG_XNU_VERIFIED_ROOT_PROBE is not set
+# CONFIG_XNU_SOURCE_MOCKFS is not set
+# CONFIG_XNU_BOOT_PROGRESS is not set
+# CONFIG_XNU_QCOM_USB_DEBUG is not set
+# CONFIG_XNU_SHENG_PMGR is not set
+# CONFIG_XNU_OWNER_ROOT_AUDIT is not set
+# CONFIG_XNU_OWNER_ROOT_TRUST is not set
+# CONFIG_XNU_OWNER_CACHE_MOUNT is not set
+# CONFIG_XNU_OWNER_CACHE_STARTUP is not set
+# CONFIG_XNU_OWNER_BOOT_MANIFEST is not set
+# CONFIG_XNU_OWNER_DATA_MOUNT is not set
+# CONFIG_XNU_OWNER_UNION_SYSTEMOS is not set

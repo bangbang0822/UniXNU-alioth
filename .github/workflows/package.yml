@@ -5,6 +5,15 @@ name: package
 # platform seed comes from the repository secret UNIXNU_UNIQUE_CHIP_ID and is baked
 # into the images, so the run's artifacts belong to one device alone: download them,
 # then delete the run.
+#
+# This workflow deviates from scripts/package.sh in one place, on purpose. package.sh
+# runs `unixnu release`, which assembles the tree and builds the kernel in a single
+# step, and a cold tree cannot do that here: scripts/build-gop-legacy-display.py and
+# build-sheng-hid-input.py read symbol addresses out of a previously prelinked kernel
+# and write them into original-bindings.S, so the first kernel has nothing to bind
+# against and stops with "No reference candidate available". The steps below therefore
+# run the documented sequence explicitly and insert a bootstrap pass between `tree` and
+# `build kernel`, exactly as configs/nabu_bootstrap_defconfig does in unixnu-nabu.
 
 on:
   workflow_dispatch:
@@ -21,6 +30,10 @@ permissions:
 concurrency:
   group: package-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  UNIXNU_UEFI: ${{ github.workspace }}/uefi-alioth
+  ALIOTH_WIFI_DIR: ${{ github.workspace }}/device/drivers/AliothWifi
 
 jobs:
   package:
@@ -90,17 +103,69 @@ jobs:
             echo '::warning::No UNIXNU_TRUST_CACHE_URL: the image will boot the kernel but AMFI will refuse the first exec.'
           fi
         working-directory: device
-      - name: package
-        working-directory: device
-        env:
-          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: defconfig, fetch, tree
+        working-directory: UniXNU
         run: |
-          args=(--os "${{ inputs.os }}" --uefi ../uefi-alioth --data-ramdisk runtime/data.dbr)
-          if [ -f runtime/trust.bundle ]; then
-            args+=(--trust-cache runtime/trust.bundle)
+          set -euo pipefail
+          ./unixnu defconfig alioth_defconfig -D ../device
+          ./unixnu fetch -D ../device
+          ./unixnu tree -D ../device
+          # build-alioth-wifi.py reads ALIOTH_WIFI_SHARED for Ath12kWifi's include/nw_abi.h.
+          # The feed directory only exists after fetch, so resolve it here into the env.
+          wifi=$(ls -d "$GITHUB_WORKSPACE"/UniXNU/out/feeds/Ath12kWifi-* | head -1)
+          [ -n "$wifi" ] || { echo '::error::Ath12kWifi was not fetched; is it still in [components] include?'; exit 1; }
+          echo "ALIOTH_WIFI_SHARED=$wifi" >> "$GITHUB_ENV"
+      - name: bootstrap kernel and prelinked candidate
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/UniXNU/out/alioth"
+          # A cold tree has no reference candidate, so the two archive builders that bind
+          # against one cannot run. Build a kernel with the archive list off, then publish it
+          # under both candidate names the builders glob for.
+          ./unixnu defconfig alioth_bootstrap_defconfig -D ../device
+          ./unixnu build kernel -D ../device
+          boot=$(ls -d "$out"/*/alioth_bootstrap | head -1)
+          if [ -f "$boot/kernel/kernel.macho" ]; then
+            mkdir -p "$(ls -d "$out"/*/alioth | head -1)/tree/build/xnu-prelink"
+            prelink="$(ls -d "$out"/*/alioth | head -1)/tree/build/xnu-prelink"
+            for name in native-owner-mobile-graphics-candidate \
+                        native-owner-ufs-cpu-desktop-v9-hid-init-candidate; do
+              cp "$boot/kernel/kernel.macho" "$prelink/$name.macho"
+              cp "$boot/kernel/kernel.json"  "$prelink/$name.json"
+            done
+            ls -l "$prelink"
+          else
+            echo '::error::the bootstrap pass produced no kernel.macho under alioth_bootstrap'
+            exit 1
           fi
-          scripts/package.sh "${args[@]}"
+          # Put the shipping configuration back before the real build.
+          ./unixnu defconfig alioth_defconfig -D ../device
+      - name: build kernel
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          ./unixnu build kernel -D ../device
+      - name: build firmware
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          ./unixnu build firmware -D ../device --uefi "$UNIXNU_UEFI"
+      - name: build payload
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          args=(build payload -D ../device --uefi "$UNIXNU_UEFI" --data-ramdisk ../device/runtime/data.dbr)
+          if [ -f ../device/runtime/trust.bundle ]; then
+            args+=(--trust-cache ../device/runtime/trust.bundle)
+          fi
+          ./unixnu "${args[@]}"
+      - name: bootimg
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          ./unixnu bootimg -D ../device --uefi "$UNIXNU_UEFI" \
+            --dtb "$UNIXNU_UEFI/Resources/DTBs/alioth.dtb" -o ../device/boot.img
       - name: images
         uses: actions/upload-artifact@v4
         with:
@@ -108,6 +173,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
           path: |
+            device/boot.img
             UniXNU/out/alioth/*/*/boot/boot.img
             UniXNU/out/alioth/*/*/payload/payload.img
             UniXNU/out/alioth/*/*/kernel/kernel.macho
