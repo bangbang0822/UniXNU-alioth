@@ -52,3 +52,27 @@ CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 # CONFIG_XNU_OWNER_BOOT_MANIFEST is not set
 # CONFIG_XNU_OWNER_DATA_MOUNT is not set
 # CONFIG_XNU_OWNER_UNION_SYSTEMOS is not set
+
+# unixnu passes the literal 0 for a string option that is absent, and
+# build-xnu-4k-baseline.sh:823 appends ${XNU_EXTRA_LD_ARCHIVES:-} to the link line
+# unconditionally, so the kernel link ends with a bare 0 and clang reads it as a file.
+# An explicit empty value keeps that token out of the command.
+CONFIG_XNU_EXTRA_LD_ARCHIVES=""
+
+# With the archive list off, the XNU patches still call three functions that the legacy
+# display archive would define, so this pass links only once they have a body:
+#
+#   _native_legacy_count_exec            <- ___mac_execve       in kern_exec.o
+#   _native_legacy_note_exit             <- _proc_exit          in kern_exit.o
+#   _native_legacy_paint_userspace_band  <- _load_init_program, _load_init_program_at_path,
+#                                           _bsd_ast            in kern_exec.o, kern_sig.o
+#
+# scripts/build-platform-power.py answers the same problem the same way for its own bridge:
+# it archives a no-op function when the reference it wants does not exist. This pass needs
+# those three bodies archived into libBootstrapStubs.a and named by
+# CONFIG_XNU_EXTRA_LD_ARCHIVES, which is why the option is left as an empty string above
+# rather than pointed at a file that does not exist yet.
+#
+# Measured 2026-11-13 on a Linux host: with the stray 0 removed, the link reaches exactly
+# these three symbols and stops. That is the state the first macOS run should confirm.
+
