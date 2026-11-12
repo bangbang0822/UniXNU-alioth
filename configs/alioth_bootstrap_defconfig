@@ -55,8 +55,7 @@ CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
 
 # unixnu passes the literal 0 for a string option that is absent, and
 # build-xnu-4k-baseline.sh:823 appends ${XNU_EXTRA_LD_ARCHIVES:-} to the link line
-# unconditionally, so the kernel link ends with a bare 0 and clang reads it as a file.
-# An explicit empty value keeps that token out of the command.
+# unconditionally, so the kernel link ends with a bare 0 that clang reads as a file.
 CONFIG_XNU_EXTRA_LD_ARCHIVES=""
 
 # With the archive list off, the XNU patches still call three functions that the legacy
@@ -69,10 +68,16 @@ CONFIG_XNU_EXTRA_LD_ARCHIVES=""
 #
 # scripts/build-platform-power.py answers the same problem the same way for its own bridge:
 # it archives a no-op function when the reference it wants does not exist. This pass needs
-# those three bodies archived into libBootstrapStubs.a and named by
-# CONFIG_XNU_EXTRA_LD_ARCHIVES, which is why the option is left as an empty string above
-# rather than pointed at a file that does not exist yet.
+# those three bodies as a stub object placed at {tree}/build/bootstrap-stubs/stubs.o.
 #
-# Measured 2026-11-13 on a Linux host: with the stray 0 removed, the link reaches exactly
-# these three symbols and stops. That is the state the first macOS run should confirm.
+# Two details, both measured 2026-11-13 on a Linux host:
+#   * the stub must be a Mach-O arm64 object, not ELF -- an ELF member is ignored by ld64 and
+#     the link still reports the symbols as undefined;
+#   * it must be passed as an object, not through an archive, because this path appends the
+#     value without -Wl,-force_load and ld64 will not pull an archive member for it.
+#
+# The object is created by the bootstrap step in .github/workflows/package.yml before
+# `build kernel` runs, and survives the tree re-assembly that step performs.
+CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/bootstrap-stubs/stubs.o"
+
 
