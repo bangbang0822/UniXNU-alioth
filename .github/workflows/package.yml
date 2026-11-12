@@ -33,7 +33,10 @@ jobs:
           submodules: recursive
       - uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU
+          # The board selects QcomXnuUsbDebug, which the upstream catalog does not carry
+          # yet; porting-record.yml pins FFT-infra/UniXNU for the same reason. Switch this
+          # back to UniXNU/UniXNU once that component is upstream.
+          repository: FFT-infra/UniXNU
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
@@ -62,12 +65,42 @@ jobs:
             echo 'Set the repository secret UNIXNU_UNIQUE_CHIP_ID: the platform seed of the device, 8 hex digits.' >&2
             exit 1
           fi
+      - name: data seed
+        # board.toml carries no [payload.runtime] builder and alioth_defconfig sets
+        # CONFIG_XNU_OWNER_DATA_MOUNT, so scripts/unixnu/runtime.py takes the fallback branch
+        # and scripts/unixnu/payload.py refuses to build without --data-ramdisk. The seed is
+        # not in any repository; supply this device's own packed seed.
+        env:
+          seed_url: ${{ secrets.UNIXNU_DATA_SEED_URL }}
+          trust_url: ${{ secrets.UNIXNU_TRUST_CACHE_URL }}
+        run: |
+          mkdir -p runtime
+          if [ -z "$seed_url" ]; then
+            echo '::error::Set UNIXNU_DATA_SEED_URL to this device'"'"'s packed Data seed (.dbr).'
+            echo 'CONFIG_XNU_OWNER_DATA_MOUNT is on and no [payload.runtime] builder exists,'
+            echo 'so build payload cannot produce an image without it.'
+            exit 1
+          fi
+          curl -fsSL "$seed_url" -o runtime/data.dbr
+          shasum -a 256 runtime/data.dbr
+          if [ -n "$trust_url" ]; then
+            curl -fsSL "$trust_url" -o runtime/trust.bundle
+            shasum -a 256 runtime/trust.bundle
+          else
+            echo '::warning::No UNIXNU_TRUST_CACHE_URL: the image will boot the kernel but AMFI will refuse the first exec.'
+          fi
+        working-directory: device
       - name: package
         working-directory: device
         env:
           UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: scripts/package.sh --os "${{ inputs.os }}" --uefi ../uefi-alioth
+        run: |
+          args=(--os "${{ inputs.os }}" --uefi ../uefi-alioth --data-ramdisk runtime/data.dbr)
+          if [ -f runtime/trust.bundle ]; then
+            args+=(--trust-cache runtime/trust.bundle)
+          fi
+          scripts/package.sh "${args[@]}"
       - name: images
         uses: actions/upload-artifact@v4
         with:
