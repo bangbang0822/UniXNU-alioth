@@ -195,24 +195,35 @@ jobs:
         working-directory: UniXNU
         run: |
           set -euo pipefail
-          ./unixnu build kernel -D ../device
+          # --init-data only reaches scripts/unixnu/runtime.py when the same invocation also has
+          # a payload step: cli.py:169 calls runtime.prepare() only if 'payload' or 'runtime' is
+          # in the step list, and runtime.py refuses --init-data unless a kernel build is in it
+          # too. So the two steps have to be one command on the first-install path.
+          if [ "${{ steps.seed.outputs.have }}" = '1' ]; then
+            ./unixnu build kernel -D ../device
+          else
+            echo 'No seed supplied: building kernel and payload together with --init-data.'
+            ./unixnu build kernel payload -D ../device --uefi "$UNIXNU_UEFI" --init-data
+          fi
       - name: build firmware
         working-directory: UniXNU
         run: |
           set -euo pipefail
           ./unixnu build firmware -D ../device --uefi "$UNIXNU_UEFI"
       - name: build payload
+        # Only when a seed was supplied. The first-install path built the payload together with
+        # the kernel above, because --init-data has to run inside a kernel build.
         if: steps.seed.outputs.have == '1'
         working-directory: UniXNU
         run: |
           set -euo pipefail
-          args=(build payload -D ../device --uefi "$UNIXNU_UEFI" --data-ramdisk ../device/runtime/data.dbr)
+          args=(build payload -D ../device --uefi "$UNIXNU_UEFI"
+                --data-ramdisk ../device/runtime/data.dbr)
           if [ -f ../device/runtime/trust.bundle ]; then
             args+=(--trust-cache ../device/runtime/trust.bundle)
           fi
           ./unixnu "${args[@]}"
       - name: bootimg
-        if: steps.seed.outputs.have == '1'
         working-directory: UniXNU
         run: |
           set -euo pipefail

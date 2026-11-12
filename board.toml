@@ -1021,6 +1021,34 @@ kernel_args = [
   # reported no real problem, so a client's failure text still wins its own row.
 ]
 
+[payload.runtime]
+# scripts/unixnu/runtime.py takes the check_data_input() branch unless this table exists, and
+# that branch refuses to build a payload at all while CONFIG_XNU_OWNER_DATA_MOUNT is set: the
+# board has no Data seed to point --data-ramdisk at. With this table present, a kernel build
+# passed --init-data runs scripts/build-boot-runtime.py, which makes the seed, the trust cache
+# and the GPU addon from the IPSW and writes the new volume UUID into the compiled config.
+#
+# Every producer here needs macOS: the fixture formats an APFS container with hdiutil, and the
+# Metal plugin needs a full Xcode with the iPhoneOS SDK. That is why the macOS workflow, not a
+# Linux host, is the only place this board's payload can be produced from a clean tree.
+#
+# The tool and key names follow UniXNU/UniXNU-sheng, the maintained format 2 example; only the
+# values change. target is ios17 here rather than ios27 because this board is on the iPadOS
+# 17.7.11 / 21H461 profile; build-boot-runtime.py only special-cases ios27 (AppSync and the
+# plugin directory name), so the 17 track takes its default branches.
+tool = "scripts/build-boot-runtime.py"
+target = "ios17"
+# Logical container size for the writable Data volume. This unit's userdata partition is
+# 242,053,263,360 bytes (225.4 GiB) as reported by fastboot getvar partition-size:userdata, so
+# the seed has to stay inside it; one GiB of headroom also covers the root image and the log
+# reserve that the packed seed's own accounting takes out.
+data_gib = 224
+skip_setup = true
+# The two trust members this board's [ipsw] fetch list extracts. sheng also names
+# Cryptex1,AppTrustCache; alioth does not fetch it, and build-boot-runtime.py reads only the
+# components it is given.
+trust_components = ["StaticTrustCache", "Cryptex1,SystemTrustCache"]
+
 [payload.adt]
 chip_id = "0x164"
 owned_memory_size = "0x100000000"
