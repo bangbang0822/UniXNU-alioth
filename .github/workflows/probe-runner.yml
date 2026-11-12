@@ -1,0 +1,12 @@
+name: runner-probe
+on:
+  workflow_dispatch:
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ubuntu-ok
+  macos:
+    runs-on: macos-26
+    steps:
+      - run: echo macos-ok
