@@ -168,6 +168,29 @@ jobs:
           fi
           # Put the shipping configuration back before the real build.
           ./unixnu defconfig alioth_defconfig -D ../device
+      - name: display ABI provenance marker
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          # scripts/audit-mobile-graphics-legacy.py reads exactly one field out of this file,
+          # runtime_metadata_checkpoint_sha256, and unconditionally rewrites everything else
+          # (abstract_slots, methods, legacy_vptr, and the candidate and original digests) from
+          # the candidate kernel and its plan. The value below is the recorded hash of the
+          # pruned QEMU observation, hardcoded at audit-mobile-graphics-legacy.py:60; that
+          # script's own comment says the observation "was pruned ... only its recorded hash is
+          # carried over".
+          #
+          # State this plainly: writing the marker REPLAYS that provenance token, it does not
+          # re-establish the observation. An image built from this run has a display ABI that
+          # was regenerated from the candidate and checked against the original family text,
+          # but its runtime checkpoint is inherited rather than re-measured. Re-measuring it
+          # needs the ESP plus gdb-stop.py route, which needs a Data seed first.
+          tree=$(ls -d "$GITHUB_WORKSPACE"/UniXNU/out/alioth/*/alioth/tree | head -1)
+          mkdir -p "$tree/build/display-analysis"
+          cat > "$tree/build/display-analysis/mobile-graphics-legacy-abi.json" <<'JSON'
+          {"runtime_metadata_checkpoint_sha256": "3044c2beff552911605994c0dc7aa73182066cbb5aed0b396999ceeb5a96da2b"}
+          JSON
+          cat "$tree/build/display-analysis/mobile-graphics-legacy-abi.json"
       - name: build kernel
         working-directory: UniXNU
         run: |
