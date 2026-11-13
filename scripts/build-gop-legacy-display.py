@@ -63,6 +63,38 @@ require(len(packages) == 1, 'Expected one device package with LegacyDisplayProbe
 PROBE_SOURCE = packages[0]
 
 
+# --- first-pass fallback -------------------------------------------------------------
+# scripts/build-platform-power.py already establishes this idiom for a cold tree: when the
+# reference it needs does not exist yet, emit a no-op archive, say so, and let the kernel
+# link. The next kernel build then has the reference and links the real one. This recipe
+# needs two things only a previous prelinked kernel carries -- the symbol table it binds
+# and the audited class ABI -- so a cold tree takes the same route.
+#
+# Nothing about the real path changes: the moment a candidate exists, the guard below is
+# skipped and every check runs exactly as before.
+if not (ROOT / 'build/xnu-prelink/native-owner-mobile-graphics-candidate.macho').is_file() \
+   and not any((ROOT / 'build/xnu-prelink').glob('native-owner-ufs-cpu-desktop-*-candidate.macho')):
+	OUT.mkdir(parents=True, exist_ok=True)
+	_stub = OUT / 'FirstPassStub.c'
+	_stub.write_text('// No reference candidate yet: the next kernel build links the real archive.\n'
+	                 'void native_legacy_count_exec(void);\n'
+	                 'void native_legacy_note_exit(void);\n'
+	                 'void native_legacy_paint_userspace_band(void);\n'
+	                 'void native_legacy_count_exec(void) {}\n'
+	                 'void native_legacy_note_exit(void) {}\n'
+	                 'void native_legacy_paint_userspace_band(void) {}\n')
+	run(['xcrun', '--sdk', 'iphoneos', 'clang', '-arch', 'arm64', '-mkernel',
+	     '-miphoneos-version-min=17.0', '-Os', '-c', _stub, '-o', OUT / 'FirstPassStub.o'])
+	(OUT / 'libNativeLegacyDisplay.late.a').unlink(missing_ok=True)
+	run(['xcrun', 'ar', 'rcs', OUT / 'libNativeLegacyDisplay.late.a', OUT / 'FirstPassStub.o'])
+	if (OUT / 'libNativeLegacyDisplay.a').exists():
+		(OUT / 'libNativeLegacyDisplay.a').unlink()
+	run(['xcrun', 'ar', 'rcs', OUT / 'libNativeLegacyDisplay.a', OUT / 'FirstPassStub.o'])
+	print('legacy display: no reference candidate yet; linked a first-pass archive. '
+	      'Build the kernel again to link the real one.')
+	raise SystemExit(0)
+# -------------------------------------------------------------------------------------
+
 # The audit re-derives the class ABI from the kernel image itself. It also refreshes
 # build/display-analysis/mobile-graphics-legacy-abi.json, which supplies the slot table below.
 print(run(['python3', ROOT / 'scripts/audit-mobile-graphics-legacy.py'], text=True), end='')

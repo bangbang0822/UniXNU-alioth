@@ -1,83 +1,31 @@
 # alioth_bootstrap_defconfig -- the first pass of a cold build.
 #
-# It exists only to produce the compile records under build/xnu/ and one prelinked kernel,
-# which the archive builders that bind against an "original candidate" then read as their
-# baseline. On a cold tree those builders stop with
+# It exists only to produce one prelinked kernel, which the archive builders that bind
+# against an "original candidate" then read as their baseline. On a cold tree those
+# builders stop with
 #
 #   No reference candidate available
 #
 # because scripts/build-gop-legacy-display.py and build-sheng-hid-input.py read symbol
 # addresses out of a previously prelinked kernel and write them into original-bindings.S.
-# That chain has to start somewhere, and this is the documented way to start it:
-# CONFIG_XNU_BUILD_ARCHIVES is absent, so this pass does not run the board archive list at
-# all -- the archives are exactly what needs the candidate this pass creates.
 #
-# The same role is played by configs/nabu_bootstrap_defconfig in unixnu-nabu, which is the
-# device repository this recipe was taken from.
+# Unlike configs/nabu_bootstrap_defconfig in unixnu-nabu, this pass does NOT turn the board
+# archive list off. Measured 2026-11-13 on a macOS runner: with CONFIG_XNU_BUILD_ARCHIVES
+# unset the archives that produce corecrypto never run, and build-xnu-4k-baseline.sh:826
+# then stops at `test -f "$CRYPTO_ARCHIVE"`. The list has to stay on; the two recipes that
+# need a candidate handle the cold tree themselves, with the same no-op fallback that
+# scripts/build-platform-power.py already uses for its bridge.
 #
-# This configuration does NOT produce a usable image. It is a build intermediate.
+# What this configuration does change is the two archives no recipe here produces from a
+# cold tree. Both are inputs of the desktop profile rather than of this one.
 
-CONFIG_XNU_SOURCE_CORECRYPTO14=y
-CONFIG_XNU_ARM_DT_PLATFORM=y
-CONFIG_XNU_ARMCPU=y
-CONFIG_XNU_NATIVE_ARCH_TIMER=y
-CONFIG_XNU_NATIVE_PAN=y
-CONFIG_XNU_DT_PANIC_REGION=y
-CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+# Produced by build-cpu-desktop-kernel.py from a mounted IPSW volume; a cold board tree has
+# neither. The plain archive that build-storage-bindings.py writes is what is available.
+CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/virtio-mmio-block/libVirtioMmioBlock.a"
 
-# The arch profile fragment sets this; a cold build must turn it back off.
-# CONFIG_XNU_BUILD_ARCHIVES is not set
-
-# Everything below drags in a board archive, a firmware bundle or an owner policy chain whose
-# inputs a cold tree does not have.
-# CONFIG_XNU_SOURCE_PTHREAD is not set
-# CONFIG_XNU_NATIVE_UFS is not set
-# CONFIG_XNU_NATIVE_AES is not set
-# CONFIG_XNU_NATIVE_VIRTIO_BLOCK is not set
-# CONFIG_XNU_NATIVE_RAM_BLOCK is not set
-# CONFIG_XNU_NATIVE_VIRTIO_CONSOLE is not set
-# CONFIG_XNU_NATIVE_MOBILE_DISPLAY is not set
-# CONFIG_XNU_NATIVE_LEGACY_DISPLAY is not set
-# CONFIG_XNU_NATIVE_ADRENO is not set
-# CONFIG_XNU_NATIVE_OFFLINE_GPU is not set
+# Same reason: the probe force-loads libVerifiedRootProbe.a from a bundle this tree cannot
+# make. The policy is unchanged in the shipping configuration; only this intermediate pass
+# links without it.
 # CONFIG_XNU_VERIFIED_ROOT_PROBE is not set
-# CONFIG_XNU_SOURCE_MOCKFS is not set
-# CONFIG_XNU_BOOT_PROGRESS is not set
-# CONFIG_XNU_QCOM_USB_DEBUG is not set
-# CONFIG_XNU_SHENG_PMGR is not set
-# CONFIG_XNU_OWNER_ROOT_AUDIT is not set
-# CONFIG_XNU_OWNER_ROOT_TRUST is not set
-# CONFIG_XNU_OWNER_CACHE_MOUNT is not set
-# CONFIG_XNU_OWNER_CACHE_STARTUP is not set
-# CONFIG_XNU_OWNER_BOOT_MANIFEST is not set
-# CONFIG_XNU_OWNER_DATA_MOUNT is not set
-# CONFIG_XNU_OWNER_UNION_SYSTEMOS is not set
 
-# unixnu passes the literal 0 for a string option that is absent, and
-# build-xnu-4k-baseline.sh:823 appends ${XNU_EXTRA_LD_ARCHIVES:-} to the link line
-# unconditionally, so the kernel link ends with a bare 0 that clang reads as a file.
-CONFIG_XNU_EXTRA_LD_ARCHIVES=""
-
-# With the archive list off, the XNU patches still call three functions that the legacy
-# display archive would define, so this pass links only once they have a body:
-#
-#   _native_legacy_count_exec            <- ___mac_execve       in kern_exec.o
-#   _native_legacy_note_exit             <- _proc_exit          in kern_exit.o
-#   _native_legacy_paint_userspace_band  <- _load_init_program, _load_init_program_at_path,
-#                                           _bsd_ast            in kern_exec.o, kern_sig.o
-#
-# scripts/build-platform-power.py answers the same problem the same way for its own bridge:
-# it archives a no-op function when the reference it wants does not exist. This pass needs
-# those three bodies as a stub object placed at {tree}/build/bootstrap-stubs/stubs.o.
-#
-# Two details, both measured 2026-11-13 on a Linux host:
-#   * the stub must be a Mach-O arm64 object, not ELF -- an ELF member is ignored by ld64 and
-#     the link still reports the symbols as undefined;
-#   * it must be passed as an object, not through an archive, because this path appends the
-#     value without -Wl,-force_load and ld64 will not pull an archive member for it.
-#
-# The object is created by the bootstrap step in .github/workflows/package.yml before
-# `build kernel` runs, and survives the tree re-assembly that step performs.
-CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/bootstrap-stubs/stubs.o"
-
-
+# This configuration does NOT produce a usable image. It is a build intermediate.
