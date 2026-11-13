@@ -34,6 +34,11 @@ concurrency:
 env:
   UNIXNU_UEFI: ${{ github.workspace }}/uefi-alioth
   ALIOTH_WIFI_DIR: ${{ github.workspace }}/device/drivers/AliothWifi
+  # scripts/prepare-xnu-source.py lists Apple's DriverKit headers through api.github.com.
+  # Unauthenticated that is 60 requests an hour per address, which hosted runners share, and
+  # the run dies with "HTTP Error 403: rate limit exceeded" partway into the kernel step. The
+  # script reads GITHUB_TOKEN or GH_TOKEN and sends it to GitHub hosts only.
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   package:
