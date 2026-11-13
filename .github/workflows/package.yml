@@ -150,6 +150,48 @@ jobs:
           wifi=$(ls -d "$GITHUB_WORKSPACE"/UniXNU/out/feeds/Ath12kWifi-* | head -1)
           [ -n "$wifi" ] || { echo '::error::Ath12kWifi was not fetched; is it still in [components] include?'; exit 1; }
           echo "ALIOTH_WIFI_SHARED=$wifi" >> "$GITHUB_ENV"
+      - name: adreno ABI include dir
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          # scripts/build-turnip-darwin.py passes -Dtu-darwin-abi-dir and
+          # scripts/build-adreno-metal-plugin.py adds -I for the same directory, both hardcoded
+          # to ROOT/drivers/Adreno740. Adreno740 is the SM8550 driver; this board selects the
+          # Adreno650 component, whose checkout keeps the same header names, and the tree has no
+          # drivers/Adreno740 at all, so the Mesa configure stops with
+          #   ERROR: Include dir .../tree/drivers/Adreno740 does not exist.
+          #
+          # Mesa only uses the directory as an include path, and the two scripts belong to the
+          # tools checkout that this workflow does not own, so give them an environment override
+          # here and point it at whatever driver directory this tree resolved. The hardcoded
+          # value stays the default, so every other board is unaffected.
+          tree=$(ls -d out/alioth/*/alioth/tree | head -1)
+          test -d "$tree/drivers/Adreno650"
+          echo "ADRENO_ABI_DIR=$GITHUB_WORKSPACE/UniXNU/$tree/drivers/Adreno650" >> "$GITHUB_ENV"
+          python3 - <<'PATCH'
+          import pathlib, sys
+          for name in ('build-turnip-darwin.py', 'build-adreno-metal-plugin.py'):
+              path = pathlib.Path('scripts') / name
+              text = path.read_text()
+              if 'ADRENO_ABI_DIR' in text:
+                  print(name, 'already patched')
+                  continue
+              stale = "ROOT / 'drivers/Adreno740'"
+              if stale not in text:
+                  sys.exit(name + ': no hardcoded Adreno740 include path')
+              count = text.count(stale)
+              # Replace first, insert second: the definition itself carries the literal.
+              text = text.replace(stale, 'ABI_DIR')
+              anchor = 'ROOT = Path(__file__).resolve().parents[1]\n'
+              if text.count(anchor) != 1:
+                  sys.exit(name + ': ROOT anchor is not unique')
+              text = text.replace(anchor, anchor +
+                  "ABI_DIR = Path(os.environ.get('ADRENO_ABI_DIR') or ROOT / 'drivers/Adreno740')\n", 1)
+              if '\nimport os\n' not in text:
+                  text = text.replace('\nimport json\n', '\nimport json\nimport os\n', 1)
+              path.write_text(text)
+              print(name, 'patched', count, 'include path(s)')
+          PATCH
       - name: bootstrap kernel and prelinked candidate
         working-directory: UniXNU
         run: |
