@@ -19,6 +19,16 @@
 # What this configuration does change is the two archives no recipe here produces from a
 # cold tree. Both are inputs of the desktop profile rather than of this one.
 
+# The three functions the XNU patches call into the legacy display driver are defined by the
+# archive the display recipe builds. That recipe needs a reference candidate, which is what this
+# pass is meant to produce, so on a cold tree nothing defines them and the link fails with
+#   _native_legacy_count_exec / _native_legacy_note_exit / _native_legacy_paint_userspace_band
+# build-xnu-4k-baseline.sh:823 appends this value to the link line, so a stub object carrying
+# the three bodies resolves them without touching the archive chain.
+# The object must be a Mach-O arm64 object and must be passed as an object rather than as an
+# archive member, because that path appends the value without -Wl,-force_load.
+CONFIG_XNU_EXTRA_LD_ARCHIVES="{tree}/build/bootstrap-stubs/stubs.o"
+
 # Produced by build-cpu-desktop-kernel.py from a mounted IPSW volume; a cold board tree has
 # neither. The plain archive that build-storage-bindings.py writes is what is available.
 CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE="{tree}/build/virtio-mmio-block/libVirtioMmioBlock.a"

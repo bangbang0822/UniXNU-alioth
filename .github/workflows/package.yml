@@ -169,6 +169,27 @@ jobs:
           PATCH
           fi
           ./unixnu defconfig alioth_bootstrap_defconfig -D ../device
+          # The bootstrap configuration names this object through CONFIG_XNU_EXTRA_LD_ARCHIVES.
+          # It carries the three bodies the XNU patches call into the legacy display driver; on a
+          # cold tree the archive that normally defines them cannot be built, because building it
+          # is what needs the candidate this pass produces. Mach-O, and passed as an object
+          # rather than an archive: this link path appends the value without -Wl,-force_load.
+          ./unixnu tree -D ../device
+          boot_tree=$(ls -d "$out"/*/alioth_bootstrap/tree | head -1)
+          mkdir -p "$boot_tree/build/bootstrap-stubs"
+          cat > "$boot_tree/build/bootstrap-stubs/stubs.c" <<'STUBS'
+          /* No reference candidate yet: the legacy display archive would define these. */
+          void native_legacy_count_exec(void);
+          void native_legacy_note_exit(void);
+          void native_legacy_paint_userspace_band(void);
+          void native_legacy_count_exec(void) {}
+          void native_legacy_note_exit(void) {}
+          void native_legacy_paint_userspace_band(void) {}
+          STUBS
+          xcrun clang -arch arm64 -mkernel -miphoneos-version-min=17.0 \
+            -c "$boot_tree/build/bootstrap-stubs/stubs.c" \
+            -o "$boot_tree/build/bootstrap-stubs/stubs.o"
+          ls -l "$boot_tree/build/bootstrap-stubs/stubs.o"
           ./unixnu build kernel -D ../device
           boot=$(ls -d "$out"/*/alioth_bootstrap | head -1)
           if [ -f "$boot/kernel/kernel.macho" ]; then
