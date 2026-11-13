@@ -23,6 +23,14 @@ on:
         type: choice
         options: ["17"]
         default: "17"
+      runner:
+        # macos-26 hosts the newest Xcode but has been the smaller pool twice tonight: runs sat
+        # queued for fifteen minutes and were cancelled before a step ran. macos-15 is the same
+        # arm64 host with an older Xcode, which is enough for every target this pipeline builds.
+        description: "Hosted macOS image"
+        type: choice
+        options: ["macos-26", "macos-15", "macos-14"]
+        default: "macos-26"
       payload:
         # The kernel build and the payload runtime are separate halves of one command because
         # --init-data only reaches scripts/unixnu/runtime.py with a payload step in the same
@@ -52,7 +60,7 @@ env:
 
 jobs:
   package:
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
