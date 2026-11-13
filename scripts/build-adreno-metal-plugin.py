@@ -118,6 +118,25 @@ if BRIDGE.is_file():
     print('REUSE: existing Rust bridge archive, build-adreno-metal-bridge.py not run')
 else:
     print('BUILD: no Rust bridge archive yet; running build-adreno-metal-bridge.py')
+    # The recipe refuses its own inputs when the translator checkout is not the pinned revision
+    # plus its recorded patch series, and its message names only the patch. Print what the two
+    # sides actually are first: the revision it read, the blob the first failing hunk expects, and
+    # a digest per patch, so a mismatch is readable from this log rather than from a rerun.
+    source = ROOT / '.cache/gpu-reference/metal2vulkan'
+    patches = ROOT / 'drivers/AdrenoMetal/bridge/patches'
+    inputs = ROOT / 'scripts/data/gpu-metal-vulkan-inputs.json'
+    pinned = json.loads(inputs.read_text())['translator']['commit'] if inputs.is_file() else '(no pin file)'
+    revision = subprocess.run(['git', '-C', str(source), 'rev-parse', 'HEAD'],
+                              capture_output=True, text=True)
+    print('bridge: translator pin %s, checkout %s' % (pinned, revision.stdout.strip() or revision.stderr.strip()[:200]))
+    dirty = subprocess.run(['git', '-C', str(source), 'status', '--porcelain'],
+                           capture_output=True, text=True).stdout.splitlines()
+    print('bridge: translator checkout has %d modified path(s)%s' % (len(dirty), (': ' + ', '.join(dirty[:5])) if dirty else ''))
+    blob = subprocess.run(['git', '-C', str(source), 'rev-parse', 'HEAD:crates/metal2vulkan-runtime/src/render.rs'],
+                          capture_output=True, text=True).stdout.strip()
+    print('bridge: render.rs blob at HEAD is %s' % (blob or '(absent)'))
+    for patch in sorted(patches.glob('*.patch')):
+        print('bridge: patch %s sha256 %s' % (patch.name[:48], hashlib.sha256(patch.read_bytes()).hexdigest()[:16]))
     subprocess.run(['python3', ROOT / 'scripts/build-adreno-metal-bridge.py', '--target', BRIDGE_TARGET],
                    check=True)
 if not BRIDGE.is_file():
