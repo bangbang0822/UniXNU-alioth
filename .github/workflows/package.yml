@@ -68,7 +68,7 @@ jobs:
           # generates src/freedreno/ir3/ir3_parser.[ch] from ir3_parser.y, and the bison that ships
           # with the runner image is 2.3, which rejects the file's Bison 3 grammar. Put the kegs
           # first and hold the version here rather than discovering it inside a forty-minute build.
-          brew install dtc llvm lld cmake mtools glslang bison flex blacktop/tap/ipsw
+          brew install dtc llvm lld cmake mtools glslang bison flex shaderc spirv-tools blacktop/tap/ipsw
           for keg in bison flex; do
             if [ -d "/opt/homebrew/opt/$keg/bin" ]; then
               echo "/opt/homebrew/opt/$keg/bin" >> "$GITHUB_PATH"
@@ -78,7 +78,7 @@ jobs:
           # Fail fast, naming the tool, before forty minutes of build.
           ok=1
           for t in clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool \
-                   mformat mcopy ipsw glslangValidator bison flex; do
+                   mformat mcopy ipsw glslangValidator bison flex glslc spirv-val; do
             command -v "$t" >/dev/null || { echo "missing tool: $t"; ok=0; }
           done
           bison_version=$(bison --version | head -1)

@@ -51,9 +51,22 @@ def use_full_xcode():
 
 use_full_xcode()
 
-DEVICE = Path(__file__).resolve().parent.parent
-ROOT = Path(os.environ.get('UNIXNU_BASE', DEVICE.parent / 'UniXNU')).resolve()
+# Two ways in, both supported. Run from this repository, as the docstring above describes, the
+# script sits in <device>/scripts and the sibling UniXNU checkout is ROOT. Run from the assembled
+# build tree, which is how scripts/unixnu/runtime.py's builder calls it (it invokes the tree's
+# copy, not this file), the same relative layout holds the other way round: that tree then owns
+# .cache/mesa-work, build/mesa-tu-ios and kits/, and the device sources have to come from
+# UNIXNU_DEVICE, the variable the driver already exports for exactly this. Detect the tree by the
+# components.toml that every assembled tree links and no device repository carries.
+HERE = Path(__file__).resolve().parent.parent
+IN_TREE = (HERE / 'components.toml').is_file()
+DEVICE = Path(os.environ.get('UNIXNU_DEVICE') or HERE).resolve()
+ROOT = Path(os.environ.get('UNIXNU_BASE') or (HERE if IN_TREE else DEVICE.parent / 'UniXNU')).resolve()
 METAL = DEVICE / 'drivers' / 'AdrenoMetal'
+# The Adreno kernel ABI headers: this repository's GPU driver component, which is Adreno650 on
+# this board. ADRENO_ABI_DIR lets the packaging workflow point both this script and
+# scripts/build-turnip-darwin.py at whatever driver directory the tree resolved.
+ABI = Path(os.environ.get('ADRENO_ABI_DIR') or ROOT / 'drivers/Adreno740').resolve()
 if not (METAL / 'NativeAdrenoMetalPlugin.mm').is_file():
     raise SystemExit('no device AdrenoMetal source at %s' % METAL)
 # --target ios27: the arm64e build for iPadOS 27 (24A446), whose render server is an arm64e process.
@@ -120,7 +133,7 @@ exe = bundle / 'NativeAdrenoMetal'
 PRIME_LIST = ROOT / 'build/prime-list.txt'
 prime_section = [f'-Wl,-sectcreate,__DATA,__primelist,{PRIME_LIST}'] if PRIME_LIST.is_file() else []
 subprocess.run([*(['xcrun', 'clang++'] + base[2:]), '-std=c++17', '-fobjc-arc', '-Wno-deprecated-declarations', '-bundle',
-                '-I', ROOT / 'drivers/Adreno740', '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
+                '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
                 '-x', 'objective-c++', METAL / 'NativeAdrenoMetalPlugin.mm',
                 METAL / 'NativeBridgeMetalFrontend.mm', '-x', 'none', pm4, BRIDGE,
                 *link_extra, '-Wl,-dead_strip', *prime_section, '-lobjc', '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'IOSurface', '-o', exe],
@@ -177,7 +190,7 @@ entitlements.write_bytes(plistlib.dumps({'com.apple.private.security.no-containe
                                          # The init trampoline mounts the pkd view over /usr/libexec itself.
                                          'com.apple.private.bindfs-allow': True}))
 daemon = OUT / 'adrenoprobed'
-subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ROOT / 'drivers/Adreno740', '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE,
+subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE,
                 '-I', ROOT / 'build/turnip-smoke',
                 METAL / 'NativeAdrenoProbeDaemon.cpp', '-x', 'objective-c++', '-fobjc-arc',
                 METAL / 'NativeInstallFix.cpp',
@@ -208,7 +221,7 @@ assert re.search(r'^Page size=4096$', detail, re.M)
 # signed cache in /System/Library/xpc/launchd.plist, so the owner job mounted over
 # /System/Library/LaunchDaemons is never loaded (lx1, 2026-11-09).
 trampoline = OUT / 'lsfixd'
-subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ROOT / 'drivers/Adreno740', '-I', ROOT / 'kits/AdrenoPM4',
+subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4',
                 '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
                 METAL / 'NativeInitTrampoline.cpp', '-x', 'objective-c++', '-fobjc-arc',
                 METAL / 'NativeInstallFix.cpp',
@@ -233,7 +246,7 @@ except (subprocess.CalledProcessError, AttributeError, FileNotFoundError) as err
 # The pkd shim: launchd's own child runs it (the trampoline mounts a view over /usr/libexec), which is
 # the only way to get the XPC bootstrap the LaunchServices rebuild needs.
 shim = OUT / 'pkd'
-subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ROOT / 'drivers/Adreno740', '-I', ROOT / 'kits/AdrenoPM4',
+subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4',
                 '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
                 METAL / 'NativePkdShim.cpp', '-x', 'objective-c++', '-fobjc-arc',
                 METAL / 'NativeInstallFix.cpp',
