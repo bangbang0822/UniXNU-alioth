@@ -191,6 +191,13 @@ archives = [
   # NativeVirtioBlock is the runtime name build-arm-driver.py checks before it accepts --verified-root.
   "build-verified-root-probe.py --component os --include-systemos",
   "build-arm-driver.py NativeVirtioBlock --verified-root --verified-root-bundle",
+  # The kernel script verifies every force-loaded archive against the record beside it:
+  # build-xnu-4k-baseline.sh:741 reads Path(archive).with_name(bindings.json). The bindings recipe
+  # is what writes that record, and it is also what re-archives the object the line above compiled:
+  # it reads <directory>/NativeVirtioBlock.o, adds original-bindings.o, and writes both the archive
+  # and bindings.json into the same directory. Without it the link stops with FileNotFoundError on
+  # build/virtio-mmio-block-verified-bundle/bindings.json.
+  "build-virtio-mmio-bindings.py --component NativeVirtioBlock --directory build/virtio-mmio-block-verified-bundle",
 ]
 
 # The iOS USB device stack, so the host can reach usbmuxd/AFC instead of only the CDC-ACM
