@@ -115,13 +115,36 @@ jobs:
           fi
           echo "have=$have" >> "$GITHUB_OUTPUT"
         working-directory: device
+      - name: mesa patch set
+        # feeds.resolve hands each (kind, name) module to the first base that carries it, and the
+        # device repository is that first base: this repository's patches/mesa holds two board
+        # patches, so the tree's patches/mesa is those two files alone and the seventeen Mesa
+        # patches pinned by scripts/data/adreno-compiler-inputs.json are shadowed by the directory,
+        # not merged into it. The payload's runtime builder then stops at the first pinned patch it
+        # cannot open: patches/mesa/freedreno-tools-nir.patch.
+        #
+        # --local-module outranks every base, so point patch:mesa at the union of the two
+        # directories for the duration of the run. Nothing else moves: patches/xnu stays this
+        # repository's own series, which is what the kernel build already applies, and the extra
+        # board patches are the ones the Mesa sources are already patched with.
+        run: |
+          set -euo pipefail
+          union="$GITHUB_WORKSPACE/runtime/patches-mesa"
+          rm -rf "$union"
+          mkdir -p "$union"
+          cp -R UniXNU/patches/mesa/. "$union/"
+          cp -R device/patches/mesa/. "$union/"
+          echo "union: $(ls -1 "$union" | wc -l | tr -d ' ') patches"
+          ls -1 "$union"
+          echo "UNIXNU_PATCH_MESA=$union" >> "$GITHUB_ENV"
       - name: defconfig, fetch, tree
         working-directory: UniXNU
         run: |
           set -euo pipefail
-          ./unixnu defconfig alioth_defconfig -D ../device
-          ./unixnu fetch -D ../device
-          ./unixnu tree -D ../device
+          mesa=(--local-module "patch:mesa=$UNIXNU_PATCH_MESA")
+          ./unixnu defconfig alioth_defconfig -D ../device "${mesa[@]}"
+          ./unixnu fetch -D ../device "${mesa[@]}"
+          ./unixnu tree -D ../device "${mesa[@]}"
           # build-alioth-wifi.py reads ALIOTH_WIFI_SHARED for Ath12kWifi's include/nw_abi.h.
           # The feed directory only exists after fetch, so resolve it here into the env.
           wifi=$(ls -d "$GITHUB_WORKSPACE"/UniXNU/out/feeds/Ath12kWifi-* | head -1)
@@ -168,13 +191,13 @@ jobs:
               sys.exit('anchor not found in the HID recipe')
           PATCH
           fi
-          ./unixnu defconfig alioth_bootstrap_defconfig -D ../device
+          ./unixnu defconfig alioth_bootstrap_defconfig -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
           # The bootstrap configuration names this object through CONFIG_XNU_EXTRA_LD_ARCHIVES.
           # It carries the three bodies the XNU patches call into the legacy display driver; on a
           # cold tree the archive that normally defines them cannot be built, because building it
           # is what needs the candidate this pass produces. Mach-O, and passed as an object
           # rather than an archive: this link path appends the value without -Wl,-force_load.
-          ./unixnu tree -D ../device
+          ./unixnu tree -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
           boot_tree=$(ls -d "$out"/*/alioth_bootstrap/tree | head -1)
           mkdir -p "$boot_tree/build/bootstrap-stubs"
           cat > "$boot_tree/build/bootstrap-stubs/stubs.c" <<'STUBS'
@@ -190,7 +213,7 @@ jobs:
             -c "$boot_tree/build/bootstrap-stubs/stubs.c" \
             -o "$boot_tree/build/bootstrap-stubs/stubs.o"
           ls -l "$boot_tree/build/bootstrap-stubs/stubs.o"
-          ./unixnu build kernel -D ../device
+          ./unixnu build kernel -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
           boot=$(ls -d "$out"/*/alioth_bootstrap | head -1)
           if [ -f "$boot/kernel/kernel.macho" ]; then
             prelink="$(ls -d "$out"/*/alioth | head -1)/tree/build/xnu-prelink"
@@ -206,7 +229,7 @@ jobs:
             exit 1
           fi
           # Put the shipping configuration back before the real build.
-          ./unixnu defconfig alioth_defconfig -D ../device
+          ./unixnu defconfig alioth_defconfig -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
       - name: display ABI provenance marker
         working-directory: UniXNU
         run: |
@@ -234,15 +257,16 @@ jobs:
         working-directory: UniXNU
         run: |
           set -euo pipefail
+          mesa=(--local-module "patch:mesa=$UNIXNU_PATCH_MESA")
           # --init-data only reaches scripts/unixnu/runtime.py when the same invocation also has
           # a payload step: cli.py:169 calls runtime.prepare() only if 'payload' or 'runtime' is
           # in the step list, and runtime.py refuses --init-data unless a kernel build is in it
           # too. So the two steps have to be one command on the first-install path.
           if [ "${{ steps.seed.outputs.have }}" = '1' ]; then
-            ./unixnu build kernel -D ../device
+            ./unixnu build kernel -D ../device "${mesa[@]}"
           else
             echo 'No seed supplied: building kernel and payload together with --init-data.'
-            ./unixnu build kernel payload -D ../device --uefi "$UNIXNU_UEFI" --init-data
+            ./unixnu build kernel payload -D ../device --uefi "$UNIXNU_UEFI" --init-data "${mesa[@]}"
           fi
       - name: build firmware
         working-directory: UniXNU
@@ -257,7 +281,8 @@ jobs:
         run: |
           set -euo pipefail
           args=(build payload -D ../device --uefi "$UNIXNU_UEFI"
-                --data-ramdisk ../device/runtime/data.dbr)
+                --data-ramdisk ../device/runtime/data.dbr
+                --local-module "patch:mesa=$UNIXNU_PATCH_MESA")
           if [ -f ../device/runtime/trust.bundle ]; then
             args+=(--trust-cache ../device/runtime/trust.bundle)
           fi
