@@ -89,6 +89,17 @@ jobs:
             ''|*[!0-9]*) echo "unreadable bison version: $version"; ok=0 ;;
             *) [ "$major" -ge 3 ] || { echo "bison is older than 3.0: $version"; ok=0; } ;;
           esac
+          # The Metal bridge is a Rust static library and its recipe pins a toolchain: cargo +1.98.0
+          # with the aarch64-apple-ios target. The image ships rustup but not that toolchain, and a
+          # missing one only surfaces minutes into the payload build.
+          if rustup toolchain list | grep -q '^1\.98\.0'; then
+            echo 'rust 1.98.0 present'
+          else
+            rustup toolchain install 1.98.0 --profile minimal --target aarch64-apple-ios
+          fi
+          rustup toolchain list | grep -q '^1\.98\.0' || { echo 'missing toolchain: 1.98.0'; ok=0; }
+          rustup target list --toolchain 1.98.0 --installed | grep -qx 'aarch64-apple-ios' || { echo 'missing rust target: aarch64-apple-ios'; ok=0; }
+          [ -f /opt/homebrew/opt/llvm/bin/llvm-as ] || { echo 'missing tool: llvm-as'; ok=0; }
           for t in lld-link llvm-lib llvm-rc llvm-nm llvm-objcopy; do
             [ -f "/opt/homebrew/opt/llvm/bin/$t" ] || [ -f "/opt/homebrew/opt/lld/bin/$t" ] || { echo "missing tool: $t"; ok=0; }
           done
@@ -168,6 +179,30 @@ jobs:
           wifi=$(ls -d "$GITHUB_WORKSPACE"/UniXNU/out/feeds/Ath12kWifi-* | head -1)
           [ -n "$wifi" ] || { echo '::error::Ath12kWifi was not fetched; is it still in [components] include?'; exit 1; }
           echo "ALIOTH_WIFI_SHARED=$wifi" >> "$GITHUB_ENV"
+      - name: adreno metal source
+        # scripts/build-adreno-metal-bridge.py (the tools checkout's own skeleton) reads the bridge
+        # patches from ROOT/drivers/AdrenoMetal/bridge/patches, and scripts/build-adreno-metal-plugin.py
+        # links the bundle against that bridge archive; both run with ROOT inside the tree, which
+        # links only selected components and so has no drivers/AdrenoMetal. The device repository
+        # carries the driver as a submodule, so put a copy in the tree.
+        #
+        # A copy, not a link: unixnu tree's _clear_links removes every symlink under tree/drivers
+        # on each run, and the build step runs tree again. Selecting the AdrenoMetal component would
+        # also produce the directory and is wrong here: the catalog gives it a dependency on
+        # Adreno740 whose build_stage is kernel, so the archive plan would compile the SM8550 driver
+        # into this board's kernel.
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          tree=$(ls -d out/alioth/*/alioth/tree | head -1)
+          src="$GITHUB_WORKSPACE/device/drivers/AdrenoMetal"
+          test -f "$src/NativeAdrenoMetalPlugin.mm"
+          mkdir -p "$tree/drivers"
+          rm -rf "$tree/drivers/AdrenoMetal"
+          cp -R "$src" "$tree/drivers/AdrenoMetal"
+          rm -f "$tree/drivers/AdrenoMetal/.git"
+          ls "$tree/drivers/AdrenoMetal/bridge/patches" | head
+          echo "adreno metal source: $(ls -1 "$tree/drivers/AdrenoMetal" | wc -l | tr -d ' ') files"
       - name: adreno ABI include dir
         working-directory: UniXNU
         run: |

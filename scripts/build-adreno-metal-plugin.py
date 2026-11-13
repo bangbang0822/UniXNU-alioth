@@ -109,8 +109,19 @@ if args.no_replay:
 else:
     subprocess.run(['python3', ROOT / 'scripts/gen-turnip-replay.py'], check=True)
 BRIDGE_TARGET = 'ios27' if IOS27 else 'ios'
-print('REUSE: existing Rust bridge archive, build-adreno-metal-bridge.py not run')
 BRIDGE = ROOT / 'build/adreno-metal-bridge' / BRIDGE_TARGET / 'libadreno_metal_bridge.a'
+# The bridge is the tools checkout's product (scripts/build-adreno-metal-bridge.py), and a tree
+# that has never built it has no archive: this script used to assume one was left behind by an
+# earlier build, which only held on the machine where it was written. Build it here instead, from
+# the tree's own copy of the recipe, so the archive matches the translator pin this tree resolved.
+if BRIDGE.is_file():
+    print('REUSE: existing Rust bridge archive, build-adreno-metal-bridge.py not run')
+else:
+    print('BUILD: no Rust bridge archive yet; running build-adreno-metal-bridge.py')
+    subprocess.run(['python3', ROOT / 'scripts/build-adreno-metal-bridge.py', '--target', BRIDGE_TARGET],
+                   check=True)
+if not BRIDGE.is_file():
+    raise SystemExit('build-adreno-metal-bridge.py produced no archive at %s' % BRIDGE)
 # arm64e: the Rust objects' imports that take a callback go through the signing wrappers of RustPacBoundary.c, and their indirect branches
 # are routed through its stripping trampolines after the link (scripts/rust-pac-rewrite.py).
 link_extra, PAC_RENAMES = [], {'_pthread_create': '_nmb_pac_pthread_create', '__tlv_atexit': '_nmb_pac_tlv_atexit',
