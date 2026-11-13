@@ -291,6 +291,12 @@ jobs:
           python3 "$tree/scripts/build-owner-systemos-policy.py"
           hdiutil detach "$volumes/os-mount"
           rm -f "$volumes/044-76040-038.dmg" "$volumes/044-76034-038.dmg" "$ipsw"
+          # build-verified-root-probe.py reuses bsd_init.o.json's compile arguments, which name
+          # build/xnu/ios-obj/EXPORT_HDRS/libsa, and appends -Werror, so a directory that the kernel
+          # build has not created yet is a hard error rather than a warning. The probe's own sources
+          # do not include libsa headers; the flag only has to resolve.
+          mkdir -p "$tree/build/xnu/ios-obj/EXPORT_HDRS/libsa"
+          ls -ld "$tree/build/xnu/ios-obj/EXPORT_HDRS/libsa"
           ls -l "$tree/build/verified-root-os" "$tree/build/verified-root-systemos" | head -20
       - name: adreno ABI include dir
         working-directory: UniXNU
