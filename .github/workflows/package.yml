@@ -66,6 +66,11 @@ env:
   # with no error, and the run before it finished the same step in 24m21s. One cargo job at a
   # time trades wall clock for headroom.
   CARGO_BUILD_JOBS: "1"
+  # The payload bakes the device tree, and scripts/unixnu/payload.py refuses to build one
+  # without the platform seed when the board's ADT says unique_chip_id = "required":
+  #   unixnu: the platform seed is not stored in any repository: pass --unique-chip-id HEX
+  # The platform seed step above only proves the secret exists; this is what hands it over.
+  UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
 
 jobs:
   package:
