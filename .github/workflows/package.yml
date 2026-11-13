@@ -409,7 +409,28 @@ jobs:
             -c "$boot_tree/build/bootstrap-stubs/stubs.c" \
             -o "$boot_tree/build/bootstrap-stubs/stubs.o"
           ls -l "$boot_tree/build/bootstrap-stubs/stubs.o"
+          # board.toml's archive list is shared with the shipping build, so this pass would also run
+          # the two verified-root recipes. It cannot: build-verified-root-probe.py compiles against
+          # build/xnu/ios-obj/EXPORT_HDRS, which a bootstrap pass does not generate because it only
+          # leaves the compile records and the link file list, and this configuration sets neither
+          # verified-root switch, so nothing here links that archive anyway. Stand the two entries
+          # down for this build and put the file back afterwards.
+          cp ../device/board.toml "$RUNNER_TEMP/board.toml.with-verified-root"
+          python3 - <<'DROP'
+          import pathlib
+          path = pathlib.Path('../device/board.toml')
+          text = path.read_text()
+          for entry in ('  "build-verified-root-probe.py --component os --include-systemos",\n',
+                        '  "build-arm-driver.py NativeVirtioBlock --verified-root --verified-root-bundle",\n'):
+              if entry not in text:
+                  raise SystemExit('archive entry not found: ' + entry.strip())
+              text = text.replace(entry, '', 1)
+          path.write_text(text)
+          print('stood down the two verified-root archive recipes for the bootstrap pass')
+          DROP
           ./unixnu build kernel -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
+          cp "$RUNNER_TEMP/board.toml.with-verified-root" ../device/board.toml
+          echo "restored board.toml: $(grep -c verified-root-bundle ../device/board.toml) verified-root entries"
           boot=$(ls -d "$out"/*/alioth_bootstrap | head -1)
           if [ -f "$boot/kernel/kernel.macho" ]; then
             prelink="$(ls -d "$out"/*/alioth | head -1)/tree/build/xnu-prelink"
