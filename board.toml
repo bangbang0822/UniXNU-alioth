@@ -1033,11 +1033,14 @@ kernel_args = [
 # Linux host, is the only place this board's payload can be produced from a clean tree.
 #
 # The tool and key names follow UniXNU/UniXNU-sheng, the maintained format 2 example; only the
-# values change. target is ios17 here rather than ios27 because this board is on the iPadOS
-# 17.7.11 / 21H461 profile; build-boot-runtime.py only special-cases ios27 (AppSync and the
-# plugin directory name), so the 17 track takes its default branches.
+# values change. target is "ios" here rather than "ios27" because this board is on the iPadOS
+# 17.7.11 / 21H461 profile: scripts/build-turnip-darwin.py maps the value to one cross triple and
+# "ios" is the arm64-apple-ios17.0 one. The accepted values are host, ios, ios27 and macos27, so
+# "ios17" is not among them, and the second macOS run of this table ended with
+# "argument --target: invalid choice: 'ios17'". build-boot-runtime.py only special-cases ios27
+# (AppSync and the plugin directory name), so the 17 track takes its default branches.
 tool = "scripts/build-boot-runtime.py"
-target = "ios17"
+target = "ios"
 # scripts/build-boot-runtime.py hands this straight to make-data-seed.py as --build, which
 # selects the Data-seed policy for the donor build. Without it the tool stops with
 # KeyError: 'build' after it has already mounted the IPSW volume, which is where the first
