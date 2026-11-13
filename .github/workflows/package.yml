@@ -64,11 +64,11 @@ jobs:
           submodules: recursive   # the firmware volume builds from the checkout's submodules
       - name: tools
         run: |
-          brew install dtc llvm lld cmake mtools blacktop/tap/ipsw
+          brew install dtc llvm lld cmake mtools glslang blacktop/tap/ipsw
           # Fail fast, naming the tool, before forty minutes of build.
           ok=1
           for t in clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool \
-                   mformat mcopy ipsw; do
+                   mformat mcopy ipsw glslangValidator; do
             command -v "$t" >/dev/null || { echo "missing tool: $t"; ok=0; }
           done
           for t in lld-link llvm-lib llvm-rc llvm-nm llvm-objcopy; do
