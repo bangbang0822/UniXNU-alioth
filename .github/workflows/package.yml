@@ -383,6 +383,18 @@ jobs:
           # rather than an archive: this link path appends the value without -Wl,-force_load.
           ./unixnu tree -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
           boot_tree=$(ls -d "$out"/*/alioth_bootstrap/tree | head -1)
+          # The archive list is board.toml's, so this pass runs it too, and it now ends with the
+          # verified-root probe. That recipe reads the policy fixtures the verified root inputs step
+          # signed into the shipping tree, which this one does not have. Copy them across: the tables
+          # are one 32-byte digest per block, about 72 MB for both volumes.
+          main_tree=$(ls -d "$out"/*/alioth/tree | head -1)
+          for fixture in verified-root-os verified-root-systemos verified-root-host; do
+            if [ -d "$main_tree/build/$fixture" ]; then
+              rm -rf "$boot_tree/build/$fixture"
+              cp -R "$main_tree/build/$fixture" "$boot_tree/build/$fixture"
+            fi
+          done
+          ls -d "$boot_tree"/build/verified-root-* 2>/dev/null || true
           mkdir -p "$boot_tree/build/bootstrap-stubs"
           cat > "$boot_tree/build/bootstrap-stubs/stubs.c" <<'STUBS'
           /* No reference candidate yet: the legacy display archive would define these. */
