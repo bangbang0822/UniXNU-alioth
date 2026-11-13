@@ -46,8 +46,12 @@ permissions:
   contents: read
 
 concurrency:
+  # A dispatch must not cancel a run that is still waiting for a hosted runner. It did: rotating the
+  # macOS label every few minutes cancelled each queued run before it could start, so twelve
+  # dispatches in a row produced twelve cancellations and no build. Queue instead; the packaging job
+  # is safe to serialise because it is dispatched by hand.
   group: package-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   UNIXNU_UEFI: ${{ github.workspace }}/uefi-alioth
