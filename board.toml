@@ -1038,6 +1038,12 @@ kernel_args = [
 # plugin directory name), so the 17 track takes its default branches.
 tool = "scripts/build-boot-runtime.py"
 target = "ios17"
+# scripts/build-boot-runtime.py hands this straight to make-data-seed.py as --build, which
+# selects the Data-seed policy for the donor build. Without it the tool stops with
+# KeyError: 'build' after it has already mounted the IPSW volume, which is where the first
+# macOS run ended on 2026-11-13. sheng carries 24A446 for its ios27 profile; this board's
+# profile is iPadOS 17.7.11 / 21H461.
+build = "21H461"
 # Logical container size for the writable Data volume. This unit's userdata partition is
 # 242,053,263,360 bytes (225.4 GiB) as reported by fastboot getvar partition-size:userdata, so
 # the seed has to stay inside it; one GiB of headroom also covers the root image and the log
