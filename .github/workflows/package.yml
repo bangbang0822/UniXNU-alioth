@@ -64,13 +64,31 @@ jobs:
           submodules: recursive   # the firmware volume builds from the checkout's submodules
       - name: tools
         run: |
-          brew install dtc llvm lld cmake mtools glslang blacktop/tap/ipsw
+          # bison and flex are keg-only, so they never reach /opt/homebrew/bin; the Mesa build
+          # generates src/freedreno/ir3/ir3_parser.[ch] from ir3_parser.y, and the bison that ships
+          # with the runner image is 2.3, which rejects the file's Bison 3 grammar. Put the kegs
+          # first and hold the version here rather than discovering it inside a forty-minute build.
+          brew install dtc llvm lld cmake mtools glslang bison flex blacktop/tap/ipsw
+          for keg in bison flex; do
+            if [ -d "/opt/homebrew/opt/$keg/bin" ]; then
+              echo "/opt/homebrew/opt/$keg/bin" >> "$GITHUB_PATH"
+            fi
+          done
+          export PATH="/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
           # Fail fast, naming the tool, before forty minutes of build.
           ok=1
           for t in clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool \
-                   mformat mcopy ipsw glslangValidator; do
+                   mformat mcopy ipsw glslangValidator bison flex; do
             command -v "$t" >/dev/null || { echo "missing tool: $t"; ok=0; }
           done
+          bison_version=$(bison --version | head -1)
+          echo "$bison_version"
+          version=${bison_version##* }
+          major=${version%%.*}
+          case "$major" in
+            ''|*[!0-9]*) echo "unreadable bison version: $version"; ok=0 ;;
+            *) [ "$major" -ge 3 ] || { echo "bison is older than 3.0: $version"; ok=0; } ;;
+          esac
           for t in lld-link llvm-lib llvm-rc llvm-nm llvm-objcopy; do
             [ -f "/opt/homebrew/opt/llvm/bin/$t" ] || [ -f "/opt/homebrew/opt/lld/bin/$t" ] || { echo "missing tool: $t"; ok=0; }
           done
@@ -335,6 +353,21 @@ jobs:
           set -euo pipefail
           ./unixnu bootimg -D ../device --uefi "$UNIXNU_UEFI" \
             --dtb "$UNIXNU_UEFI/Resources/DTBs/alioth.dtb" -o ../device/boot.img
+      - name: build logs
+        # A failing producer writes its reason into its own log and only a summary reaches the step
+        # output: the Mesa build prints "Build failed; see ...mesa-tu-ios-build.log" and leaves the
+        # compiler error in that file, which is on the runner and gone with it. Upload them on any
+        # failure so the next diagnosis starts from the real message.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ inputs.os }}
+          retention-days: 2
+          if-no-files-found: warn
+          path: |
+            UniXNU/out/alioth/*/*/logs/*.log
+            UniXNU/out/alioth/*/*/tree/.cache/*.log
+            UniXNU/out/alioth/*/*/tree/build/**/*.log
       - name: images
         if: always()
         uses: actions/upload-artifact@v4
