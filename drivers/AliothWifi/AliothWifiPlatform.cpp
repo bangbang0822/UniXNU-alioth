@@ -522,6 +522,28 @@ extern "C" void AliothWifiRandom(void *out, size_t n) {
 extern "C" int nw_wifi_step(void);
 extern "C" struct nw_wifi_stats nw_wifi_stats;
 
+/* The ath11k runtime is a separate archive: scripts/build-alioth-ath11k.py --archive builds it,
+ * and the first MHI round links it once the PCIe call site exists (see that recipe's docstring).
+ * This platform shim is already inside the force-loaded libAdreno740.a, so its two references have
+ * to resolve today or the whole kernel link stops on them:
+ *
+ *     "_nw_wifi_start", referenced from wifiStart(void*, int) in AliothWifiPlatform.o
+ *
+ * Define both hooks weak here. They answer "no runtime" and leave the boot alone, and a real
+ * archive definition overrides a weak one, so linking the ath11k half later needs no change here. */
+extern "C" __attribute__((weak)) int
+nw_wifi_start(const struct lx_platform *, const struct nw_board *)
+{
+    return -1;
+}
+
+extern "C" __attribute__((weak)) int
+nw_wifi_step(void)
+{
+    return 0;
+}
+
+
 static volatile int gWorkerStop;
 static void wifiWorker(void *, wait_result_t) {
     uint64_t next = 0, started = nowMs();
