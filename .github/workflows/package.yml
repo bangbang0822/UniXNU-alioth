@@ -61,6 +61,11 @@ env:
   # the run dies with "HTTP Error 403: rate limit exceeded" partway into the kernel step. The
   # script reads GITHUB_TOKEN or GH_TOKEN and sends it to GitHub hosts only.
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # The Rust bridge builds with fat LTO and one codegen unit (its manifest asks for both), which
+  # peaked past this runner's memory: one run's log stopped at "Compiling adreno-metal-bridge"
+  # with no error, and the run before it finished the same step in 24m21s. One cargo job at a
+  # time trades wall clock for headroom.
+  CARGO_BUILD_JOBS: "1"
 
 jobs:
   package:
@@ -253,6 +258,17 @@ jobs:
             UniXNU/out/alioth/*/alioth/tree/build/verified-root-host
           key: verified-root-21H461-806400-v1
           restore-keys: verified-root-21H461-
+      - name: rust bridge cache
+        # The bridge is a Rust static library built with fat LTO, and a cold build takes 24 minutes.
+        # Its inputs are the translator pin and the recorded patch series under the tools checkout,
+        # so key the cache on exactly those: a restored archive makes the plugin skip the build.
+        uses: actions/cache@v4
+        with:
+          path: |
+            UniXNU/out/alioth/*/alioth/tree/build/m2v-target
+            UniXNU/out/alioth/*/alioth/tree/build/adreno-metal-bridge
+          key: rust-bridge-${{ hashFiles('UniXNU/scripts/data/gpu-metal-vulkan-inputs.json', 'UniXNU/drivers/AdrenoMetal/bridge/patches/*.patch') }}
+          restore-keys: rust-bridge-
       - name: verified root inputs
         # scripts/build-owner-os-policy.py and build-owner-systemos-policy.py sign the original
         # volumes' block tables, and build-verified-root-probe.py turns that into the archive the
