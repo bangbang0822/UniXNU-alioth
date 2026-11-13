@@ -23,6 +23,16 @@ on:
         type: choice
         options: ["17"]
         default: "17"
+      payload:
+        # The kernel build and the payload runtime are separate halves of one command because
+        # --init-data only reaches scripts/unixnu/runtime.py with a payload step in the same
+        # invocation. Iterating on the kernel's archive list and link does not need Mesa, Turnip,
+        # the Rust bridge or the Metal plugin, and those cost about forty minutes of the run, so a
+        # false value links the kernel alone and stops before the boot image.
+        description: "Build the payload runtime too (false links the kernel only)"
+        type: choice
+        options: ["true", "false"]
+        default: "true"
 
 permissions:
   contents: read
@@ -217,6 +227,20 @@ jobs:
           ls "$tree/drivers/AdrenoMetal/bridge/patches" | head
           echo "adreno metal source: $src"
           echo "adreno metal source: $(ls -1 "$tree/drivers/AdrenoMetal" | wc -l | tr -d ' ') files"
+      - name: verified root cache
+        # The two signed block tables and the host library are deterministic in their inputs (the
+        # IPSW members, the owner key and the kit source), and signing them verifies about 2.3
+        # million 4 KiB blocks. Restoring them from the cache removes the IPSW download, the 8.5 GB
+        # of extraction and both policy runs from every run after the first.
+        id: vrcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            UniXNU/out/alioth/*/alioth/tree/build/verified-root-os
+            UniXNU/out/alioth/*/alioth/tree/build/verified-root-systemos
+            UniXNU/out/alioth/*/alioth/tree/build/verified-root-host
+          key: verified-root-21H461-806400-v1
+          restore-keys: verified-root-21H461-
       - name: verified root inputs
         # scripts/build-owner-os-policy.py and build-owner-systemos-policy.py sign the original
         # volumes' block tables, and build-verified-root-probe.py turns that into the archive the
@@ -240,57 +264,63 @@ jobs:
           host="$tree/build/verified-root-host"
           mkdir -p "$volumes" "$host/keys"
 
-          openssl version
-          openssl genrsa -out "$host/keys/owner.pem" 3072
-          openssl rsa -in "$host/keys/owner.pem" -pubout -out "$host/keys/owner-public.pem"
-          openssl rsa -pubin -in "$host/keys/owner-public.pem" -modulus -noout | head -c 60; echo
+          if [ -f "$tree/build/verified-root-os/verification.json" ] &&
+             [ -f "$tree/build/verified-root-systemos/verification.json" ] &&
+             [ -f "$host/verified-root.dylib" ] && [ -f "$host/keys/owner.pem" ]; then
+            echo "verified root fixtures restored from cache: $(ls -d "$tree"/build/verified-root-*)"
+          else
+            openssl version
+            openssl genrsa -out "$host/keys/owner.pem" 3072
+            openssl rsa -in "$host/keys/owner.pem" -pubout -out "$host/keys/owner-public.pem"
+            openssl rsa -pubin -in "$host/keys/owner-public.pem" -modulus -noout | head -c 60; echo
 
-          clang -dynamiclib -O2 -Wall -Wextra \
-            -I "$tree/kits/VerifiedRoot/include" -I /opt/homebrew/opt/openssl@3/include \
-            "$tree/kits/VerifiedRoot/src/verified_root.c" \
-            "$tree/kits/VerifiedRoot/tests/openssl_provider.c" \
-            -L /opt/homebrew/opt/openssl@3/lib -lcrypto \
-            -o "$host/verified-root.dylib"
-          nm -gU "$host/verified-root.dylib" | grep -E 'vr_host_open|vr_host_block'
+            clang -dynamiclib -O2 -Wall -Wextra \
+              -I "$tree/kits/VerifiedRoot/include" -I /opt/homebrew/opt/openssl@3/include \
+              "$tree/kits/VerifiedRoot/src/verified_root.c" \
+              "$tree/kits/VerifiedRoot/tests/openssl_provider.c" \
+              -L /opt/homebrew/opt/openssl@3/lib -lcrypto \
+              -o "$host/verified-root.dylib"
+            nm -gU "$host/verified-root.dylib" | grep -E 'vr_host_open|vr_host_block'
 
-          ipsw="$GITHUB_WORKSPACE/runtime/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
-          mkdir -p "$GITHUB_WORKSPACE/runtime"
-          [ -f "$ipsw" ] || curl -fL --retry 3 --retry-delay 5 -o "$ipsw" \
-            "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
-          unzip -o -j "$ipsw" "044-76040-038.dmg" -d "$volumes"
-          # The SystemOS member sits at the archive root, not under Firmware/ beside its trust cache,
-          # so a path guess stops the step with unzip's "filename not matched". Its size is fixed by
-          # the recipe as 806400 blocks of 4096 bytes; compute that rather than writing it out, which
-          # is how a first attempt came to ask for a member 4,608 bytes short of the real one.
-          sysos_bytes=$((806400 * 4096))
-          member=$(unzip -l "$ipsw" | awk -v want="$sysos_bytes" '$1 == want {print $4; exit}')
-          if [ -z "$member" ]; then
-            echo "::error::no $sysos_bytes-byte member in the IPSW; its disk images are:"
-            unzip -l "$ipsw" | grep -i '\.dmg' | head -20
-            exit 1
+            ipsw="$GITHUB_WORKSPACE/runtime/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+            mkdir -p "$GITHUB_WORKSPACE/runtime"
+            [ -f "$ipsw" ] || curl -fL --retry 3 --retry-delay 5 -o "$ipsw" \
+              "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+            unzip -o -j "$ipsw" "044-76040-038.dmg" -d "$volumes"
+            # The SystemOS member sits at the archive root, not under Firmware/ beside its trust cache,
+            # so a path guess stops the step with unzip's "filename not matched". Its size is fixed by
+            # the recipe as 806400 blocks of 4096 bytes; compute that rather than writing it out, which
+            # is how a first attempt came to ask for a member 4,608 bytes short of the real one.
+            sysos_bytes=$((806400 * 4096))
+            member=$(unzip -l "$ipsw" | awk -v want="$sysos_bytes" '$1 == want {print $4; exit}')
+            if [ -z "$member" ]; then
+              echo "::error::no $sysos_bytes-byte member in the IPSW; its disk images are:"
+              unzip -l "$ipsw" | grep -i '\.dmg' | head -20
+              exit 1
+            fi
+            echo "SystemOS member: $member ($sysos_bytes bytes)"
+            rm -rf "$GITHUB_WORKSPACE/runtime/sysos" && mkdir -p "$GITHUB_WORKSPACE/runtime/sysos"
+            unzip -o -j "$ipsw" "$member" -d "$GITHUB_WORKSPACE/runtime/sysos"
+            mv -f "$GITHUB_WORKSPACE/runtime/sysos/$(basename "$member")" "$volumes/044-76034-038.dmg"
+
+            # Both recipes refuse anything but the exact supplied members, so check before they do.
+            echo '3f99b859c9728379110b66657c7b15285bcb1925ad8b5726542e2cdcf8b1028d  '"$volumes/044-76040-038.dmg" | shasum -a 256 -c -
+            echo 'b4908cde41d23e6bc05e6af51a2c9eeb00cf0f863a6a18b1600c96a3fd70414f  '"$volumes/044-76034-038.dmg" | shasum -a 256 -c -
+
+            mkdir -p "$volumes/os-mount"
+            hdiutil attach -readonly -nobrowse -mountpoint "$volumes/os-mount" "$volumes/044-76040-038.dmg"
+            hdiutil info | grep -A2 '044-76040-038.dmg' | head -5
+            du -sh "$volumes"
+
+            # Sign both block tables here rather than inside the archive list: this step runs before
+            # the bootstrap pass, so a refusal costs a minute instead of a full XNU build, and the
+            # images can be detached and deleted afterwards. Only the two recipes that need the
+            # compile records stay in board.toml's archive list.
+            python3 "$tree/scripts/build-owner-os-policy.py"
+            python3 "$tree/scripts/build-owner-systemos-policy.py"
+            hdiutil detach "$volumes/os-mount"
+            rm -f "$volumes/044-76040-038.dmg" "$volumes/044-76034-038.dmg" "$ipsw"
           fi
-          echo "SystemOS member: $member ($sysos_bytes bytes)"
-          rm -rf "$GITHUB_WORKSPACE/runtime/sysos" && mkdir -p "$GITHUB_WORKSPACE/runtime/sysos"
-          unzip -o -j "$ipsw" "$member" -d "$GITHUB_WORKSPACE/runtime/sysos"
-          mv -f "$GITHUB_WORKSPACE/runtime/sysos/$(basename "$member")" "$volumes/044-76034-038.dmg"
-
-          # Both recipes refuse anything but the exact supplied members, so check before they do.
-          echo '3f99b859c9728379110b66657c7b15285bcb1925ad8b5726542e2cdcf8b1028d  '"$volumes/044-76040-038.dmg" | shasum -a 256 -c -
-          echo 'b4908cde41d23e6bc05e6af51a2c9eeb00cf0f863a6a18b1600c96a3fd70414f  '"$volumes/044-76034-038.dmg" | shasum -a 256 -c -
-
-          mkdir -p "$volumes/os-mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$volumes/os-mount" "$volumes/044-76040-038.dmg"
-          hdiutil info | grep -A2 '044-76040-038.dmg' | head -5
-          du -sh "$volumes"
-
-          # Sign both block tables here rather than inside the archive list: this step runs before
-          # the bootstrap pass, so a refusal costs a minute instead of a full XNU build, and the
-          # images can be detached and deleted afterwards. Only the two recipes that need the
-          # compile records stay in board.toml's archive list.
-          python3 "$tree/scripts/build-owner-os-policy.py"
-          python3 "$tree/scripts/build-owner-systemos-policy.py"
-          hdiutil detach "$volumes/os-mount"
-          rm -f "$volumes/044-76040-038.dmg" "$volumes/044-76034-038.dmg" "$ipsw"
           # build-verified-root-probe.py reuses bsd_init.o.json's compile arguments, which name
           # build/xnu/ios-obj/EXPORT_HDRS/libsa, and appends -Werror, so a directory that the kernel
           # build has not created yet is a hard error rather than a warning. The probe's own sources
@@ -487,6 +517,9 @@ jobs:
           # too. So the two steps have to be one command on the first-install path.
           if [ "${{ steps.seed.outputs.have }}" = '1' ]; then
             ./unixnu build kernel -D ../device "${mesa[@]}"
+          elif [ "${{ inputs.payload }}" = 'false' ]; then
+            echo 'Kernel only: the payload runtime (Mesa, Turnip, the Rust bridge, the plugin) is not prepared.'
+            ./unixnu build kernel -D ../device "${mesa[@]}"
           else
             echo 'No seed supplied: building kernel and payload together with --init-data.'
             ./unixnu build kernel payload -D ../device --uefi "$UNIXNU_UEFI" --init-data "${mesa[@]}"
@@ -511,6 +544,8 @@ jobs:
           fi
           ./unixnu "${args[@]}"
       - name: bootimg
+        # The boot image carries the payload; without it there is nothing to pack.
+        if: inputs.payload != 'false'
         working-directory: UniXNU
         run: |
           set -euo pipefail
