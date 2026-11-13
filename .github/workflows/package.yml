@@ -68,7 +68,7 @@ jobs:
           # generates src/freedreno/ir3/ir3_parser.[ch] from ir3_parser.y, and the bison that ships
           # with the runner image is 2.3, which rejects the file's Bison 3 grammar. Put the kegs
           # first and hold the version here rather than discovering it inside a forty-minute build.
-          brew install dtc llvm lld cmake mtools glslang bison flex shaderc spirv-tools blacktop/tap/ipsw
+          brew install dtc llvm lld cmake mtools glslang bison flex shaderc spirv-tools openssl@3 blacktop/tap/ipsw
           for keg in bison flex; do
             if [ -d "/opt/homebrew/opt/$keg/bin" ]; then
               echo "/opt/homebrew/opt/$keg/bin" >> "$GITHUB_PATH"
@@ -217,6 +217,69 @@ jobs:
           ls "$tree/drivers/AdrenoMetal/bridge/patches" | head
           echo "adreno metal source: $src"
           echo "adreno metal source: $(ls -1 "$tree/drivers/AdrenoMetal" | wc -l | tr -d ' ') files"
+      - name: verified root inputs
+        # scripts/build-owner-os-policy.py and build-owner-systemos-policy.py sign the original
+        # volumes' block tables, and build-verified-root-probe.py turns that into the archive the
+        # kernel force-loads behind CONFIG_XNU_VERIFIED_ROOT_PROBE. Both policy recipes read
+        # <tree>/.cache/firmware/target-volumes, which is this repository's .cache/firmware through
+        # the tree's link, and the OS one also requires its image to be attached read-only with the
+        # mount point it inspects.
+        #
+        # None of this was ever scripted: build/verified-root-host (the host library and the owner
+        # key) had no producer anywhere in the tools checkout, exactly as build/verified-root-os and
+        # build/verified-root-systemos had none, and the kernel link stops without them. Build them
+        # here from the recipes that do exist. The host library is the kit's own C plus its OpenSSL
+        # provider; the key is a fresh RSA-3072 pair, which manifest.public_anchor() checks for
+        # exponent 65537 and a 384-byte modulus.
+        working-directory: UniXNU
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/opt/openssl@3/bin:$PATH"
+          tree=$(ls -d out/alioth/*/alioth/tree | head -1)
+          volumes="$GITHUB_WORKSPACE/device/.cache/firmware/target-volumes"
+          host="$tree/build/verified-root-host"
+          mkdir -p "$volumes" "$host/keys"
+
+          openssl version
+          openssl genrsa -out "$host/keys/owner.pem" 3072
+          openssl rsa -in "$host/keys/owner.pem" -pubout -out "$host/keys/owner-public.pem"
+          openssl rsa -pubin -in "$host/keys/owner-public.pem" -modulus -noout | head -c 60; echo
+
+          clang -dynamiclib -O2 -Wall -Wextra \
+            -I "$tree/kits/VerifiedRoot/include" -I /opt/homebrew/opt/openssl@3/include \
+            "$tree/kits/VerifiedRoot/src/verified_root.c" \
+            "$tree/kits/VerifiedRoot/tests/openssl_provider.c" \
+            -L /opt/homebrew/opt/openssl@3/lib -lcrypto \
+            -o "$host/verified-root.dylib"
+          nm -gU "$host/verified-root.dylib" | grep -E 'vr_host_open|vr_host_block'
+
+          ipsw="$GITHUB_WORKSPACE/runtime/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+          mkdir -p "$GITHUB_WORKSPACE/runtime"
+          [ -f "$ipsw" ] || curl -fL --retry 3 --retry-delay 5 -o "$ipsw" \
+            "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
+          unzip -o -j "$ipsw" "044-76040-038.dmg" -d "$volumes"
+          rm -rf "$GITHUB_WORKSPACE/runtime/sysos" && mkdir -p "$GITHUB_WORKSPACE/runtime/sysos"
+          unzip -o "$ipsw" "Firmware/044-76034-038.dmg" -d "$GITHUB_WORKSPACE/runtime/sysos"
+          mv -f "$GITHUB_WORKSPACE/runtime/sysos/Firmware/044-76034-038.dmg" "$volumes/"
+
+          # Both recipes refuse anything but the exact supplied members, so check before they do.
+          echo '3f99b859c9728379110b66657c7b15285bcb1925ad8b5726542e2cdcf8b1028d  '"$volumes/044-76040-038.dmg" | shasum -a 256 -c -
+          echo 'b4908cde41d23e6bc05e6af51a2c9eeb00cf0f863a6a18b1600c96a3fd70414f  '"$volumes/044-76034-038.dmg" | shasum -a 256 -c -
+
+          mkdir -p "$volumes/os-mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$volumes/os-mount" "$volumes/044-76040-038.dmg"
+          hdiutil info | grep -A2 '044-76040-038.dmg' | head -5
+          du -sh "$volumes"
+
+          # Sign both block tables here rather than inside the archive list: this step runs before
+          # the bootstrap pass, so a refusal costs a minute instead of a full XNU build, and the
+          # images can be detached and deleted afterwards. Only the two recipes that need the
+          # compile records stay in board.toml's archive list.
+          python3 "$tree/scripts/build-owner-os-policy.py"
+          python3 "$tree/scripts/build-owner-systemos-policy.py"
+          hdiutil detach "$volumes/os-mount"
+          rm -f "$volumes/044-76040-038.dmg" "$volumes/044-76034-038.dmg" "$ipsw"
+          ls -l "$tree/build/verified-root-os" "$tree/build/verified-root-systemos" | head -20
       - name: adreno ABI include dir
         working-directory: UniXNU
         run: |

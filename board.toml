@@ -172,6 +172,25 @@ archives = [
   # The 35 missing addresses are A-5's remaining work, not this round's. Left out so every other
   # build can run; turn it on with the full table. progress/2026-10-31-usb-bindings.md
   # "build-alioth-usb-bindings.py --component AliothUSBDevice --archive libAliothUSBDevice.a --directory build/alioth-usb",
+
+  # The two archives alioth_defconfig already names were built by no recipe at all, so a cold tree
+  # reached the link input check with
+  #   XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE: .../libVirtioMmioBlock.a not found
+  # and stopped. Their producers exist in the tools checkout but nothing called them:
+  #
+  #   build-owner-os-policy.py        signs the original OS volume's block table
+  #   build-owner-systemos-policy.py  the same for Cryptex1,SystemOS
+  #   build-verified-root-probe.py    compiles the probe from both signed policies
+  #   build-arm-driver.py             compiles the authenticated block transport (-DNATIVE_VERIFIED_BLOCK)
+  #
+  # The two policy recipes that sign the original volumes run in the packaging workflow's verified
+  # root inputs step instead: they only need the images, the owner key pair and the host library,
+  # and running them before the bootstrap pass makes a refusal cheap. What stays here needs the
+  # compile records. The verified transport is a second build of VirtioMmioBlock's source: the
+  # plain component entry above stays, because the two are different archives with different macros.
+  # NativeVirtioBlock is the runtime name build-arm-driver.py checks before it accepts --verified-root.
+  "build-verified-root-probe.py --component os --include-systemos",
+  "build-arm-driver.py NativeVirtioBlock --verified-root --verified-root-bundle",
 ]
 
 # The iOS USB device stack, so the host can reach usbmuxd/AFC instead of only the CDC-ACM
