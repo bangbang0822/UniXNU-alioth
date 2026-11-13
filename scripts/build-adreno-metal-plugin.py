@@ -67,6 +67,13 @@ METAL = DEVICE / 'drivers' / 'AdrenoMetal'
 # this board. ADRENO_ABI_DIR lets the packaging workflow point both this script and
 # scripts/build-turnip-darwin.py at whatever driver directory the tree resolved.
 ABI = Path(os.environ.get('ADRENO_ABI_DIR') or ROOT / 'drivers/Adreno740').resolve()
+# This fork's headers reach their sibling components by relative path, as in
+# `#include "../GopFramebuffer/NativeGOPWire.h"` from GpuScanoutPresenter.h. A quoted include is
+# resolved against the including file's own directory first, and this repository carries no
+# drivers/GopFramebuffer: that component is a feed, and the tree is where it is linked. The next
+# attempt appends the whole relative path to each -I directory, so naming the AdrenoMetal
+# directory on either side makes <drivers>/AdrenoMetal/../GopFramebuffer answer it.
+SIBLINGS = ['-I', str(ROOT / 'drivers/AdrenoMetal'), '-I', str(DEVICE / 'drivers/AdrenoMetal')]
 if not (METAL / 'NativeAdrenoMetalPlugin.mm').is_file():
     raise SystemExit('no device AdrenoMetal source at %s' % METAL)
 # --target ios27: the arm64e build for iPadOS 27 (24A446), whose render server is an arm64e process.
@@ -163,7 +170,7 @@ exe = bundle / 'NativeAdrenoMetal'
 PRIME_LIST = ROOT / 'build/prime-list.txt'
 prime_section = [f'-Wl,-sectcreate,__DATA,__primelist,{PRIME_LIST}'] if PRIME_LIST.is_file() else []
 subprocess.run([*(['xcrun', 'clang++'] + base[2:]), '-std=c++17', '-fobjc-arc', '-Wno-deprecated-declarations', '-bundle',
-                '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
+                '-I', ABI, *SIBLINGS, '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
                 '-x', 'objective-c++', METAL / 'NativeAdrenoMetalPlugin.mm',
                 METAL / 'NativeBridgeMetalFrontend.mm', '-x', 'none', pm4, BRIDGE,
                 *link_extra, '-Wl,-dead_strip', *prime_section, '-lobjc', '-framework', 'Foundation', '-framework', 'Metal', '-framework', 'IOSurface', '-o', exe],
@@ -220,7 +227,7 @@ entitlements.write_bytes(plistlib.dumps({'com.apple.private.security.no-containe
                                          # The init trampoline mounts the pkd view over /usr/libexec itself.
                                          'com.apple.private.bindfs-allow': True}))
 daemon = OUT / 'adrenoprobed'
-subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE,
+subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, *SIBLINGS, '-I', ROOT / 'kits/AdrenoPM4', '-I', VULKAN_INCLUDE,
                 '-I', ROOT / 'build/turnip-smoke',
                 METAL / 'NativeAdrenoProbeDaemon.cpp', '-x', 'objective-c++', '-fobjc-arc',
                 METAL / 'NativeInstallFix.cpp',
@@ -251,7 +258,7 @@ assert re.search(r'^Page size=4096$', detail, re.M)
 # signed cache in /System/Library/xpc/launchd.plist, so the owner job mounted over
 # /System/Library/LaunchDaemons is never loaded (lx1, 2026-11-09).
 trampoline = OUT / 'lsfixd'
-subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4',
+subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, *SIBLINGS, '-I', ROOT / 'kits/AdrenoPM4',
                 '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
                 METAL / 'NativeInitTrampoline.cpp', '-x', 'objective-c++', '-fobjc-arc',
                 METAL / 'NativeInstallFix.cpp',
@@ -276,7 +283,7 @@ except (subprocess.CalledProcessError, AttributeError, FileNotFoundError) as err
 # The pkd shim: launchd's own child runs it (the trampoline mounts a view over /usr/libexec), which is
 # the only way to get the XPC bootstrap the LaunchServices rebuild needs.
 shim = OUT / 'pkd'
-subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, '-I', ROOT / 'kits/AdrenoPM4',
+subprocess.run(['xcrun', 'clang++', *base[2:], '-std=c++17', '-I', ABI, *SIBLINGS, '-I', ROOT / 'kits/AdrenoPM4',
                 '-I', VULKAN_INCLUDE, '-I', ROOT / 'build/turnip-smoke',
                 METAL / 'NativePkdShim.cpp', '-x', 'objective-c++', '-fobjc-arc',
                 METAL / 'NativeInstallFix.cpp',
