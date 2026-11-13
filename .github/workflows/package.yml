@@ -258,16 +258,18 @@ jobs:
           [ -f "$ipsw" ] || curl -fL --retry 3 --retry-delay 5 -o "$ipsw" \
             "https://updates.cdn-apple.com/2025SpringFCS/fullrestores/122-77166/DCA6CFE8-90E9-4B92-880D-3DE171798E40/iPad_Pro_HFR_17.7.11_21H461_Restore.ipsw"
           unzip -o -j "$ipsw" "044-76040-038.dmg" -d "$volumes"
-          # The SystemOS member does not sit under Firmware/ beside its trust cache, and guessing the
-          # path stops the step with unzip's "filename not matched". Its size is fixed by the recipe
-          # (806400 blocks of 4096 bytes), so select the entry by that instead of by name.
-          member=$(unzip -l "$ipsw" | awk '$1 == 3302553600 {print $4; exit}')
+          # The SystemOS member sits at the archive root, not under Firmware/ beside its trust cache,
+          # so a path guess stops the step with unzip's "filename not matched". Its size is fixed by
+          # the recipe as 806400 blocks of 4096 bytes; compute that rather than writing it out, which
+          # is how a first attempt came to ask for a member 4,608 bytes short of the real one.
+          sysos_bytes=$((806400 * 4096))
+          member=$(unzip -l "$ipsw" | awk -v want="$sysos_bytes" '$1 == want {print $4; exit}')
           if [ -z "$member" ]; then
-            echo '::error::no 3302553600-byte member in the IPSW; its disk images are:'
+            echo "::error::no $sysos_bytes-byte member in the IPSW; its disk images are:"
             unzip -l "$ipsw" | grep -i '\.dmg' | head -20
             exit 1
           fi
-          echo "SystemOS member: $member"
+          echo "SystemOS member: $member ($sysos_bytes bytes)"
           rm -rf "$GITHUB_WORKSPACE/runtime/sysos" && mkdir -p "$GITHUB_WORKSPACE/runtime/sysos"
           unzip -o -j "$ipsw" "$member" -d "$GITHUB_WORKSPACE/runtime/sysos"
           mv -f "$GITHUB_WORKSPACE/runtime/sysos/$(basename "$member")" "$volumes/044-76034-038.dmg"
