@@ -17,7 +17,7 @@ inputs = [
   "unixnu.lock records the resolved git sources, so a checkout resolves to the same commits without moving.",
 ]
 configuration = [
-  "schema_version = 2. [board]: name alioth, soc SM8250, soc_source sm8250, os_profile ipados-17.7.11-21H461, kit alioth. [components] include names twelve components; ShengUfs pulls VirtioMmioBlock and VerifiedRoot, and ShengHidInput pulls ShengNovatekTouch, so status resolves fifteen.",
+  "schema_version = 2. [board]: name alioth, soc SM8250, soc_source sm8250, os_profile ipados-17.7.11-21H461, kit alioth. [components] include names seventeen components; the resolver's dependencies add VerifiedRoot, ShengNovatekTouch and QcomGeniSpi, so status resolves twenty.",
   "profiles.merge is a recursive dictionary merge and replaces a list wholesale: the board's config_fragments, patch_series and archives are the whole lists, not additions to the arch profile's.",
   "configs/alioth_defconfig holds 29 CONFIG_XNU_ switches. unixnu defconfig writes them into out/DEVICE/OS/CONFIG/.config, and build kernel reads .config, never the defconfig.",
   "Patch order is the four series in sequence: arch 57 entries, soc 2 (native-smp-secondary, native-smp-type-clusters), os 9 (including two QcomXnuUsbDebug and two XnuPrelink component patches), device 0. status --json reports all 68 in that order.",
@@ -50,6 +50,7 @@ completion = [
   "Measured 2026-11-07: status --json resolves the device branches from drivers/ArmCpu and drivers/Adreno650, the base components and 68 patches from the four profile files, and porting-record.py check passes with 15 areas.",
   "Measured 2026-11-13 on a clean checkout: the kernel step cannot finish on a cold tree. scripts/build-gop-legacy-display.py:218 and build-sheng-hid-input.py:31 read symbol addresses out of a previously prelinked kernel under build/xnu-prelink/ and write them into original-bindings.S as absolute `.set name, 0xfffffff0...` values, so the first build of the tree stops at archive 19 with `No reference candidate available`. The documented way to start the chain is a bootstrap configuration with CONFIG_XNU_BUILD_ARCHIVES unset, which builds the compile records and one kernel without running the archive list that needs that kernel; configs/nabu_bootstrap_defconfig in unixnu-nabu is the worked precedent. This repository now carries configs/alioth_bootstrap_defconfig, and .github/workflows/package.yml runs the bootstrap pass between `tree` and `build kernel` and publishes the pass's kernel under both candidate names, because scripts/package.sh's `release` assembles and builds in one step and leaves no place to insert it.",
   "Measured 2026-11-13: the archive list also needs Ath12kWifi in [components].include. build-alioth-wifi.py compiles the board's own drivers/AliothWifi/AliothWifiPlatform.cpp against include/nw_abi.h, which it reads from ALIOTH_WIFI_SHARED, and the checkout is what puts the driver in reach; without the component the script stops at `AliothWifiPlatform.cpp not found`. With the component selected, ALIOTH_WIFI_DIR and ALIOTH_WIFI_SHARED set, and the two candidate-dependent builders stood down, the list advances from archive 19 to archive 26.",
+  "Measured 2026-11-13: patches/mesa in this repository shadows the base repository's Mesa patch set instead of extending it, and the payload build stops on the difference. feeds.resolve gives each (kind, name) module to the first base that carries it, and the device repository is that first base, so the tree's patches/mesa is this repository's two board patches alone; scripts/build-boot-runtime.py then applies the seventeen patches pinned by scripts/data/adreno-compiler-inputs.json and fails at the first one it cannot open, patches/mesa/freedreno-tools-nir.patch. .github/workflows/package.yml now copies both directories into one and points the patch:mesa module at it with --local-module, which outranks every base. patches/xnu is deliberately not touched: the same rule is what makes the kernel series this board's own, and that series is what the bootstrap pass already linked.",
   "The remaining stop on a Linux host is build/virtio-mmio-block-verified-bundle/libVirtioMmioBlock.a, which CONFIG_XNU_NATIVE_VIRTIO_BLOCK_ARCHIVE names and which only build-cpu-desktop-kernel.py produces; the same applies to build/verified-root-os-xnu-bundle/libVerifiedRootProbe.a behind CONFIG_XNU_VERIFIED_ROOT_ARCHIVE. Both producers are macOS-only, so a Linux build host ends here by design and the macOS runner is the only host that can complete the chain.",
 ]
 limits = [
@@ -398,7 +399,7 @@ evidence = [{ kind = "device", reference = "docs/evidence/2026-11-06-official-fl
 [[area]]
 id = "network"
 status = "planned"
-components = []
+components = ["Ath12kWifi"]
 paths = ["package/alioth_pcie.c", "package/*Wifi*", "package/MhiBoot*", "scripts/*wifi*", "scripts/*mhi*"]
 inputs = [
   "QCA6390 at 17cb:1101 behind qcom,pcie@1c00000; parf 0x01c00000+0x3000, phy 0x01c06000+0x1000, dm_core 0x60000000+0xf1d, ELBI 0x60000f20+0xa8, IATU 0x60001000+0x1000, conf 0x60100000+0x100000.",
