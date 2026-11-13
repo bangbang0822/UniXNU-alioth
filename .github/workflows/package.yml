@@ -455,14 +455,20 @@ jobs:
           python3 - <<'DROP'
           import pathlib
           path = pathlib.Path('../device/board.toml')
-          text = path.read_text()
-          for entry in ('  "build-verified-root-probe.py --component os --include-systemos",\n',
-                        '  "build-arm-driver.py NativeVirtioBlock --verified-root --verified-root-bundle",\n'):
-              if entry not in text:
-                  raise SystemExit('archive entry not found: ' + entry.strip())
-              text = text.replace(entry, '', 1)
-          path.write_text(text)
-          print('stood down the two verified-root archive recipes for the bootstrap pass')
+          kept, dropped = [], []
+          for line in path.read_text().splitlines(keepends=True):
+              entry = line.strip()
+              if entry.startswith('"') and entry.endswith('",') and (
+                      'verified-root' in entry or 'verified-bundle' in entry):
+                  dropped.append(entry)
+                  continue
+              kept.append(line)
+          if not dropped:
+              raise SystemExit('no verified-root archive entries to stand down')
+          path.write_text(''.join(kept))
+          print('stood down', len(dropped), 'entries for the bootstrap pass:')
+          for entry in dropped:
+              print('  ' + entry)
           DROP
           ./unixnu build kernel -D ../device --local-module "patch:mesa=$UNIXNU_PATCH_MESA"
           cp "$RUNNER_TEMP/board.toml.with-verified-root" ../device/board.toml
