@@ -79,3 +79,36 @@ Follow [Port a device](https://unixnu.com/porting/) in order. Read the
 components. Follow each subsystem guide for board inputs, implementation paths,
 archive integration and expected results. Include board-package services such as
 brightness, buttons, Wi-Fi, DSP, battery and CPU frequency in the porting record.
+
+## Review gate
+
+Every change in this repository is reviewed before it is committed, and the author
+does not review their own work. The review is performed by a separate reviewer agent
+that starts with no context from the author's session: it reads the diff and the files
+itself, and its conclusions are written to `docs/reviews/<date>-<topic>.md` in this
+repository, whose path the commit message then cites. The page is deliberately `.md`:
+the record checker in the tools checkout (`tools/scripts/porting-record.py` in
+`Porting record`) does not treat documentation as a record change, so the page needs no
+finding of its own.
+
+The reviewer checks, at minimum:
+
+- **Correctness** — does the change achieve what it claims, without logic, path or
+  escaping errors?
+- **Blast radius** — does it affect another board or OS profile, or change a default
+  that other boards rely on? Prefer "keep the default, override for this board".
+- **Hidden prerequisites** — does it depend on a file, key, network access or cache
+  that exists only on the author's machine?
+- **Record coverage** — a changed path that belongs to an area in `porting.toml`
+  needs a finding or evidence update for that same area in the same commit; the
+  `Porting record` workflow is the machine check for this.
+- **Reversibility** — can the change be rolled back to a named commit if it fails?
+- **Smuggling** — unrelated edits, leftover debugging, or overwritten work by someone
+  else.
+
+A `CHANGES REQUESTED` verdict blocks the commit. When a finding is disputed, the
+rebuttal is written into the same review file and the change is reviewed again.
+
+High-risk paths — `.github/workflows/**`, `board.toml`, `configs/**`, `drivers/**`
+and any kernel patch — are also validated on the kernel-only path
+(`payload=false`, about twenty minutes) before the full packaging run.

@@ -2,9 +2,13 @@ name: Porting record
 
 # docs/porting/device-repository asks for this check. It runs the same script the reusable
 # workflow in the UniXNU repository runs, but checks out FFT-infra/UniXNU as the tools
-# repository: the board's catalog carries the QcomXnuUsbDebug component this repository
-# selects, and the upstream catalog does not have it yet. Switch the tools checkout back to
-# UniXNU/UniXNU, and the whole job back to the reusable workflow, once it is upstream.
+# repository: the board's catalog carries the QcomXnuUsbDebug and Adreno650 components this
+# repository selects, and the upstream catalog carries neither at bba3b578. Switching the tools
+# checkout back to UniXNU/UniXNU, and the job back to the reusable workflow, needs two things and
+# not one: the upstream catalog gaining both rows (or an idempotent supplement here), and the
+# upstream preflight expanding the `{component}` placeholder QcomXnuUsbDebug's build row starts
+# with. The packaging workflow's tools checkout is pinned to this same commit; see the
+# configuration area's finding of 2026-11-18 in porting.toml for the measurements.
 
 on:
   push:
@@ -24,8 +28,11 @@ jobs:
           fetch-depth: 0
       - uses: actions/checkout@v4
         with:
+          # Same commit as the packaging workflow's tools checkout. The check loads this
+          # checkout's components.toml to resolve the board's twenty components, so a floating
+          # main here would validate one catalog while the packaging builds another.
           repository: FFT-infra/UniXNU
-          ref: main
+          ref: e0ee2ad9a2654309480c8b0cc725d0dc09186cd4
           path: tools
       - uses: actions/setup-python@v5
         with:

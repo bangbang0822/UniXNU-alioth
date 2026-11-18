@@ -83,10 +83,20 @@ jobs:
           submodules: recursive
       - uses: actions/checkout@v4
         with:
-          # The board selects QcomXnuUsbDebug, which the upstream catalog does not carry
-          # yet; porting-record.yml pins FFT-infra/UniXNU for the same reason. Switch this
-          # back to UniXNU/UniXNU once that component is upstream.
+          # The board fork, pinned to the commit this workflow was proved on. Two things are
+          # deliberate here. The fork, because the upstream catalog still misses two of the twenty
+          # components this board selects (QcomXnuUsbDebug, Adreno650), so checking out
+          # UniXNU/UniXNU fails component resolution; that switch waits on an idempotent catalog
+          # supplement (or upstream adding both rows) and on the upstream kernel.preflight
+          # expanding a `{component}` placeholder: QcomXnuUsbDebug's build row starts with
+          # `{component}/scripts/build.py`, and scripts/unixnu/kernel.py:196-222 at
+          # UniXNU/UniXNU@bba3b578 joins that raw string to the tree, so the first `build kernel`
+          # would stop with "Build inputs missing". Adreno650 is not affected: its row names
+          # build-adreno650.py, which this repository carries and the tree copies into scripts/.
+          # The pin, because a floating main means the image is built from whatever moved that
+          # night: 2026-11-14's 191,293,440-byte image was made from this exact commit.
           repository: FFT-infra/UniXNU
+          ref: e0ee2ad9a2654309480c8b0cc725d0dc09186cd4
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
